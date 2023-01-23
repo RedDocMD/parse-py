@@ -180,10 +180,6 @@ pub struct Function {
     stmts: Vec<StmtKind>,
 }
 
-fn arg_names(args: &[Arg]) -> Vec<String> {
-    args.into_iter().map(|arg| arg.node.arg.clone()).collect()
-}
-
 impl Function {
     pub fn has_kwargs_dict(&self) -> bool {
         self.args.kwarg.is_some()
@@ -195,6 +191,10 @@ impl Function {
     }
 
     pub fn formal_params(&self) -> Vec<FormalParam> {
+        fn arg_names(args: &[Arg]) -> Vec<String> {
+            args.into_iter().map(|arg| arg.node.arg.clone()).collect()
+        }
+
         let posonly = arg_names(&self.args.posonlyargs);
         let normal = arg_names(&self.args.args);
         let kwonly = arg_names(&self.args.kwonlyargs);
@@ -235,7 +235,53 @@ impl Function {
     }
 
     pub fn format_args(&self) -> String {
-        todo!()
+        fn make_arg_list(args: &[Arg]) -> String {
+            let mut list = String::new();
+            for (i, arg) in args.iter().enumerate() {
+                if i != 0 {
+                    list.push_str(", ");
+                }
+                list.push_str(&arg.node.arg);
+            }
+            list
+        }
+
+        let args = make_arg_list(&self.args.args);
+        let posonly = make_arg_list(&self.args.posonlyargs);
+        let kwonly = make_arg_list(&self.args.kwonlyargs);
+
+        let mut out = String::new();
+        if posonly.len() > 0 {
+            out.push_str(&posonly);
+            out.push('/');
+        }
+        out.push_str(&args);
+        if let Some(vararg) = &self.args.vararg {
+            if (!out.is_empty() && out.as_bytes().last().unwrap() != &b'/') || !out.is_empty() {
+                out.push_str("/ ");
+            }
+            out.push('*');
+            out.push_str(&vararg.node.arg);
+            if !kwonly.is_empty() {
+                out.push_str(", ");
+                out.push_str(&kwonly);
+            }
+        }
+        if let Some(kwarg) = &self.args.kwarg {
+            if (!out.is_empty() && out.as_bytes().last().unwrap() != &b'/') || !out.is_empty() {
+                out.push_str(", ");
+            }
+            out.push_str("**");
+            out.push_str(&kwarg.node.arg);
+        }
+
+        out
+    }
+}
+
+impl Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "function {}({})", self.data.obj_path, self.format_args())
     }
 }
 
