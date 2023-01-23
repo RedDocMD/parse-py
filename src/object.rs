@@ -202,6 +202,7 @@ impl Function {
         let def_cnt = self.args.defaults.len();
         let norm_def_cnt = normal.len().min(def_cnt);
         let posonly_def_cnt = posonly.len().min(def_cnt - norm_def_cnt);
+        let kwonly_def_cnt = self.args.kw_defaults.len();
 
         let mut params = Vec::new();
 
@@ -221,8 +222,20 @@ impl Function {
                 kind: FormalParamKind::Normal,
             });
         }
+        for (i, arg) in kwonly.iter().enumerate() {
+            let has_default = i > (kwonly.len() - kwonly_def_cnt);
+            params.push(FormalParam {
+                name: arg.to_string(),
+                has_default,
+                kind: FormalParamKind::KwOnly,
+            })
+        }
 
         params
+    }
+
+    pub fn format_args(&self) -> String {
+        todo!()
     }
 }
 
