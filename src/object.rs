@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rustpython_parser::ast::{Arg, Arguments, StmtKind};
+use rustpython_parser::ast::{Arg, Arguments, Stmt, StmtKind};
 
 /// Represents a span in a Python source file.
 /// This span typically denotes something, like a function or class.
@@ -381,5 +381,21 @@ impl Hash for Object {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.data().hash(state);
         self.ob_type().hash(state);
+    }
+}
+
+struct ModuleCreator {
+    filename: PathBuf,
+    line_cnt: i32,
+    mod_path: ObjectPath,
+}
+
+impl ModuleCreator {
+    fn create(self, stmts: &[Stmt]) -> Object {
+        let mod_span = SourceSpan::new(self.filename, 0, self.line_cnt);
+        let mut module = Module {
+            data: ObjectData::new(mod_span, self.mod_path),
+        };
+        todo!()
     }
 }
