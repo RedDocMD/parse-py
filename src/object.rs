@@ -2,18 +2,19 @@ use std::{
     collections::HashMap,
     fmt::{self, Display},
     hash::{Hash, Hasher},
-    path::{Path, PathBuf},
+    os::unix::prelude::OsStrExt,
+    path::{Component, Path, PathBuf},
 };
 
-use rustpython_parser::ast::{Arg, Arguments, Stmt, StmtKind};
+use rustpython_parser::ast::{Arg, Arguments, ExcepthandlerKind, Stmt, StmtKind};
 
 /// Represents a span in a Python source file.
 /// This span typically denotes something, like a function or class.
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct SourceSpan {
     path: PathBuf,
-    start: i32,
-    end: i32,
+    start: usize,
+    end: usize,
 }
 
 impl Display for SourceSpan {
@@ -23,7 +24,7 @@ impl Display for SourceSpan {
 }
 
 impl SourceSpan {
-    pub fn new(path: PathBuf, start: i32, end: i32) -> Self {
+    pub fn new(path: PathBuf, start: usize, end: usize) -> Self {
         Self { path, start, end }
     }
 
@@ -31,11 +32,11 @@ impl SourceSpan {
         &self.path
     }
 
-    pub fn start(&self) -> i32 {
+    pub fn start(&self) -> usize {
         self.start
     }
 
-    pub fn end(&self) -> i32 {
+    pub fn end(&self) -> usize {
         self.end
     }
 }
@@ -115,6 +116,13 @@ impl ObjectData {
         };
         self.children.insert(name, child);
     }
+
+    pub fn append_children(&mut self, children: Vec<Object>) {
+        for child in children {
+            let name = child.data().name().to_string();
+            self.append_child(name, child);
+        }
+    }
 }
 
 impl PartialEq for ObjectData {
@@ -177,7 +185,7 @@ pub struct FormalParam {
 pub struct Function {
     data: ObjectData,
     args: Arguments,
-    stmts: Vec<StmtKind>,
+    stmts: HashMap<usize, StmtKind>,
 }
 
 impl Function {
@@ -384,18 +392,153 @@ impl Hash for Object {
     }
 }
 
-struct ModuleCreator {
+pub struct ModuleCreator {
     filename: PathBuf,
-    line_cnt: i32,
-    mod_path: ObjectPath,
+    line_cnt: usize,
+    par_path: ObjectPath,
 }
 
 impl ModuleCreator {
-    fn create(self, stmts: &[Stmt]) -> Object {
-        let mod_span = SourceSpan::new(self.filename, 0, self.line_cnt);
-        let mut module = Module {
-            data: ObjectData::new(mod_span, self.mod_path),
-        };
-        todo!()
+    pub fn new(filename: PathBuf, line_cnt: usize, par_path: ObjectPath) -> Self {
+        ModuleCreator {
+            filename,
+            line_cnt,
+            par_path,
+        }
     }
+
+    pub fn create(self, stmts: &[Stmt]) -> Module {
+        let mod_path = self.mod_path();
+        let children = objects_from_stmts(stmts, &mod_path, &self.filename);
+        let mod_span = SourceSpan::new(self.filename, 0, self.line_cnt);
+        let mut mod_data = ObjectData::new(mod_span, mod_path);
+        mod_data.append_children(children);
+        Module { data: mod_data }
+    }
+
+    fn mod_path(&self) -> ObjectPath {
+        let mut mod_path = self.par_path.clone();
+        mod_path.append_part(self.mod_name());
+        mod_path
+    }
+
+    fn mod_name(&self) -> String {
+        let mut parts = self.filename.components().rev();
+        let last = parts.next().unwrap();
+        if let Component::Normal(last) = last {
+            if last.as_bytes() == b"__init__.py" {
+                let par = parts.next().unwrap();
+                if let Component::Normal(par) = par {
+                    par.to_os_string().into_string().unwrap()
+                } else {
+                    unreachable!("mod path must have parent");
+                }
+            } else {
+                last.to_os_string().into_string().unwrap()
+            }
+        } else {
+            unreachable!("mod path must have a filename");
+        }
+    }
+}
+
+fn extract_statements_from_body(stmts: &[Stmt]) -> HashMap<usize, StmtKind> {
+    let mut stmts_map = HashMap::new();
+    for stmt in stmts {
+        stmts_map.extend(extract_statement(stmt));
+    }
+    stmts_map
+}
+
+fn extract_statement(stmt: &Stmt) -> HashMap<usize, StmtKind> {
+    let node = &stmt.node;
+    let mut stmts = HashMap::from([(stmt.location.row(), node.clone())]);
+    match node {
+        // Don't recurse into function or class definitions, that is handled else-where
+        StmtKind::FunctionDef { .. } => return HashMap::new(),
+        StmtKind::AsyncFunctionDef { .. } => return HashMap::new(),
+        StmtKind::ClassDef { .. } => return HashMap::new(),
+        // For the rest, recurse
+        StmtKind::For { body, .. } => stmts.extend(extract_statements_from_body(body)),
+        StmtKind::AsyncFor { body, .. } => stmts.extend(extract_statements_from_body(body)),
+        StmtKind::While { body, .. } => stmts.extend(extract_statements_from_body(body)),
+        StmtKind::If { body, .. } => stmts.extend(extract_statements_from_body(body)),
+        StmtKind::With { body, .. } => stmts.extend(extract_statements_from_body(body)),
+        StmtKind::AsyncWith { body, .. } => stmts.extend(extract_statements_from_body(body)),
+        StmtKind::Match { cases, .. } => {
+            for cs in cases {
+                stmts.extend(extract_statements_from_body(&cs.body));
+            }
+        }
+        StmtKind::Try {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        } => {
+            for b in [body, orelse, finalbody] {
+                stmts.extend(extract_statements_from_body(b));
+            }
+            for h in handlers {
+                match &h.node {
+                    ExcepthandlerKind::ExceptHandler { body, .. } => {
+                        stmts.extend(extract_statements_from_body(&body));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    stmts
+}
+
+fn objects_from_stmts(stmts: &[Stmt], par_path: &ObjectPath, file_path: &Path) -> Vec<Object> {
+    let make_span = |stmt: &Stmt| {
+        let start = stmt.location.row();
+        let end = stmt.end_location.unwrap().row();
+        SourceSpan::new(file_path.to_path_buf(), start, end)
+    };
+    let make_path = |name: &str| {
+        let mut path = par_path.clone();
+        path.append_part(name.to_string());
+        path
+    };
+
+    let mut objects = Vec::new();
+    for stmt in stmts {
+        let kind = &stmt.node;
+        match kind {
+            StmtKind::ClassDef { name, body, .. } => {
+                let class_path = make_path(name);
+                let class_span = make_span(stmt);
+
+                let children = objects_from_stmts(body, &class_path, file_path);
+                let mut class_data = ObjectData::new(class_span, class_path);
+                class_data.append_children(children);
+                let class = Class { data: class_data };
+                objects.push(Object::Class(class));
+            }
+            StmtKind::FunctionDef {
+                name, args, body, ..
+            } => {
+                let func_path = make_path(name);
+                let func_span = make_span(stmt);
+
+                let children = objects_from_stmts(body, &func_path, file_path);
+                let stmts = extract_statements_from_body(body);
+                let mut func_data = ObjectData::new(func_span, func_path);
+                func_data.append_children(children);
+
+                let func = Function {
+                    data: func_data,
+                    args: args.as_ref().clone(),
+                    stmts,
+                };
+                objects.push(Object::Function(func));
+            }
+            // TODO: Handle async function
+            _ => {}
+        }
+    }
+    objects
 }
