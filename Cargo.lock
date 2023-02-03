@@ -431,6 +431,7 @@ version = "0.1.0"
 dependencies = [
  "rayon",
  "rustpython-parser",
+ "thiserror",
 ]
 
 [[package]]

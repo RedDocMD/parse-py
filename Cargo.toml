@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 rayon = "1.6.1"
 rustpython-parser = "0.2.0"
+thiserror = "1"

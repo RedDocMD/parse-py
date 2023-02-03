@@ -151,6 +151,17 @@ impl Display for Module {
     }
 }
 
+impl Module {
+    pub fn name(&self) -> &str {
+        self.data.name()
+    }
+
+    pub fn append_child(&mut self, child: Object) {
+        self.data
+            .append_child(child.data().name().to_string(), child);
+    }
+}
+
 /// Represents a Python class.
 #[derive(Debug, Clone)]
 pub struct Class {
