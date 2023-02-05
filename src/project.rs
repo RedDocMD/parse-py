@@ -14,9 +14,21 @@ pub type ObjectDb = HashMap<Position, Object>;
 
 pub struct Project {
     root: PathBuf,
-    db: ObjectDb,
-    kw_fns: ObjectDb,
+    // db: ObjectDb,
+    // kw_fns: ObjectDb,
     root_ob: Module,
+}
+
+impl Project {
+    pub fn create(root: PathBuf) -> Result<Self> {
+        let root_ob = module_from_dir(ObjectPath::default(), root.clone())?
+            .ok_or_else(|| ProjectError::EmptyRoot(root.clone()))?;
+        Ok(Self { root_ob, root })
+    }
+}
+
+fn db_from_object(ob: Object) -> ObjectDb {
+    todo!()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -29,11 +41,14 @@ pub enum ProjectError {
 
     #[error("parse error: {0}")]
     Parse(#[from] rustpython_parser::error::ParseError),
+
+    #[error("no Python module in {}", .0.display())]
+    EmptyRoot(PathBuf),
 }
 
 pub type Result<T> = std::result::Result<T, ProjectError>;
 
-fn object_from_dir(par_path: ObjectPath, dir: PathBuf) -> Result<Option<Object>> {
+fn module_from_dir(par_path: ObjectPath, dir: PathBuf) -> Result<Option<Module>> {
     let drc = DirChildren::create(&dir)?;
     let Some(init) = drc.init else {
         return Ok(None);
@@ -48,13 +63,13 @@ fn object_from_dir(par_path: ObjectPath, dir: PathBuf) -> Result<Option<Object>>
         main_mod.append_child(Object::Module(child_mod));
     }
     for dir in drc.dirs {
-        let child_ob = object_from_dir(new_path.clone(), dir)?;
+        let child_ob = module_from_dir(new_path.clone(), dir)?;
         if let Some(child_ob) = child_ob {
-            main_mod.append_child(child_ob);
+            main_mod.append_child(Object::Module(child_ob));
         }
     }
 
-    Ok(Some(Object::Module(main_mod)))
+    Ok(Some(main_mod))
 }
 
 fn mod_from_file(path: PathBuf, par_path: ObjectPath) -> Result<Module> {
@@ -64,7 +79,7 @@ fn mod_from_file(path: PathBuf, par_path: ObjectPath) -> Result<Module> {
         &code,
         path.to_str().ok_or(ProjectError::OsStringNotUtf8)?,
     )?;
-    Ok(ModuleCreator::new(path.to_path_buf(), line_cnt, par_path).create(&stmts))
+    Ok(ModuleCreator::new(path.to_path_buf(), line_cnt, par_path).create(stmts))
 }
 
 struct DirChildren {

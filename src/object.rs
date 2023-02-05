@@ -6,7 +6,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use rustpython_parser::ast::{Arg, Arguments, ExcepthandlerKind, Stmt, StmtKind};
+use rustpython_parser::ast::{Arg, Arguments, ExcepthandlerKind, Location, Stmt, StmtKind};
 
 /// Represents a span in a Python source file.
 /// This span typically denotes something, like a function or class.
@@ -359,6 +359,19 @@ impl Object {
         }
     }
 
+    pub fn into_data(self) -> ObjectData {
+        match self {
+            Object::Module(m) => m.data,
+            Object::Class(c) => c.data,
+            Object::Function(f) => f.data,
+            Object::AltObject(a) => a.data,
+        }
+    }
+
+    pub fn into_children(self) -> impl Iterator<Item = Object> {
+        self.into_data().children.into_values()
+    }
+
     pub fn ob_type(&self) -> &'static str {
         match self {
             Object::Module(_) => "mod",
@@ -418,7 +431,7 @@ impl ModuleCreator {
         }
     }
 
-    pub fn create(self, stmts: &[Stmt]) -> Module {
+    pub fn create(self, stmts: Vec<Stmt>) -> Module {
         let mod_path = self.mod_path();
         let children = objects_from_stmts(stmts, &mod_path, &self.filename);
         let mod_span = SourceSpan::new(self.filename, 0, self.line_cnt);
@@ -453,7 +466,7 @@ impl ModuleCreator {
     }
 }
 
-fn extract_statements_from_body(stmts: &[Stmt]) -> HashMap<usize, StmtKind> {
+fn extract_statements_from_body(stmts: Vec<Stmt>) -> HashMap<usize, StmtKind> {
     let mut stmts_map = HashMap::new();
     for stmt in stmts {
         stmts_map.extend(extract_statement(stmt));
@@ -461,8 +474,8 @@ fn extract_statements_from_body(stmts: &[Stmt]) -> HashMap<usize, StmtKind> {
     stmts_map
 }
 
-fn extract_statement(stmt: &Stmt) -> HashMap<usize, StmtKind> {
-    let node = &stmt.node;
+fn extract_statement(stmt: Stmt) -> HashMap<usize, StmtKind> {
+    let node = stmt.node;
     let mut stmts = HashMap::from([(stmt.location.row(), node.clone())]);
     match node {
         // Don't recurse into function or class definitions, that is handled else-where
@@ -478,7 +491,7 @@ fn extract_statement(stmt: &Stmt) -> HashMap<usize, StmtKind> {
         StmtKind::AsyncWith { body, .. } => stmts.extend(extract_statements_from_body(body)),
         StmtKind::Match { cases, .. } => {
             for cs in cases {
-                stmts.extend(extract_statements_from_body(&cs.body));
+                stmts.extend(extract_statements_from_body(cs.body));
             }
         }
         StmtKind::Try {
@@ -491,9 +504,9 @@ fn extract_statement(stmt: &Stmt) -> HashMap<usize, StmtKind> {
                 stmts.extend(extract_statements_from_body(b));
             }
             for h in handlers {
-                match &h.node {
+                match h.node {
                     ExcepthandlerKind::ExceptHandler { body, .. } => {
-                        stmts.extend(extract_statements_from_body(&body));
+                        stmts.extend(extract_statements_from_body(body));
                     }
                 }
             }
@@ -503,25 +516,25 @@ fn extract_statement(stmt: &Stmt) -> HashMap<usize, StmtKind> {
     stmts
 }
 
-fn objects_from_stmts(stmts: &[Stmt], par_path: &ObjectPath, file_path: &Path) -> Vec<Object> {
-    let make_span = |stmt: &Stmt| {
-        let start = stmt.location.row();
-        let end = stmt.end_location.unwrap().row();
+fn objects_from_stmts(stmts: Vec<Stmt>, par_path: &ObjectPath, file_path: &Path) -> Vec<Object> {
+    let make_span = |loc: Location, end_loc: Option<Location>| {
+        let start = loc.row();
+        let end = end_loc.unwrap().row();
         SourceSpan::new(file_path.to_path_buf(), start, end)
     };
-    let make_path = |name: &str| {
+    let make_path = |name: String| {
         let mut path = par_path.clone();
-        path.append_part(name.to_string());
+        path.append_part(name);
         path
     };
 
     let mut objects = Vec::new();
     for stmt in stmts {
-        let kind = &stmt.node;
+        let kind = stmt.node;
         match kind {
             StmtKind::ClassDef { name, body, .. } => {
                 let class_path = make_path(name);
-                let class_span = make_span(stmt);
+                let class_span = make_span(stmt.location, stmt.end_location);
 
                 let children = objects_from_stmts(body, &class_path, file_path);
                 let mut class_data = ObjectData::new(class_span, class_path);
@@ -533,16 +546,16 @@ fn objects_from_stmts(stmts: &[Stmt], par_path: &ObjectPath, file_path: &Path) -
                 name, args, body, ..
             } => {
                 let func_path = make_path(name);
-                let func_span = make_span(stmt);
+                let func_span = make_span(stmt.location, stmt.end_location);
 
-                let children = objects_from_stmts(body, &func_path, file_path);
+                let children = objects_from_stmts(body.clone(), &func_path, file_path);
                 let stmts = extract_statements_from_body(body);
                 let mut func_data = ObjectData::new(func_span, func_path);
                 func_data.append_children(children);
 
                 let func = Function {
                     data: func_data,
-                    args: args.as_ref().clone(),
+                    args: *args,
                     stmts,
                 };
                 objects.push(Object::Function(func));
