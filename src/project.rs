@@ -1,22 +1,10 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use crate::object::{Module, ModuleCreator, Object, ObjectPath};
 
-pub struct Position {
-    filename: PathBuf,
-    start: usize,
-}
-
-pub type ObjectDb = HashMap<Position, Object>;
-
 pub struct Project {
-    root: PathBuf,
-    // db: ObjectDb,
-    // kw_fns: ObjectDb,
-    root_ob: Module,
+    pub root: PathBuf,
+    pub root_ob: Module,
 }
 
 impl Project {
@@ -25,10 +13,6 @@ impl Project {
             .ok_or_else(|| ProjectError::EmptyRoot(root.clone()))?;
         Ok(Self { root_ob, root })
     }
-}
-
-fn db_from_object(ob: Object) -> ObjectDb {
-    todo!()
 }
 
 #[derive(Debug, thiserror::Error)]

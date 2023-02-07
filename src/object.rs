@@ -17,6 +17,14 @@ pub struct SourceSpan {
     end: usize,
 }
 
+// Represents a Python source element by its starting position
+// and filename.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Position {
+    filename: PathBuf,
+    start: usize,
+}
+
 impl Display for SourceSpan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}-{}", self.path.display(), self.start, self.end)
@@ -38,6 +46,15 @@ impl SourceSpan {
 
     pub fn end(&self) -> usize {
         self.end
+    }
+}
+
+impl From<SourceSpan> for Position {
+    fn from(span: SourceSpan) -> Self {
+        Self {
+            filename: span.path,
+            start: span.start,
+        }
     }
 }
 
@@ -123,6 +140,10 @@ impl ObjectData {
             self.append_child(name, child);
         }
     }
+
+    pub fn position(&self) -> Position {
+        self.span.clone().into()
+    }
 }
 
 impl PartialEq for ObjectData {
@@ -185,9 +206,9 @@ pub enum FormalParamKind {
 /// Denotes a formal parameter of a function.
 #[derive(Debug, Clone)]
 pub struct FormalParam {
-    name: String,
-    has_default: bool,
-    kind: FormalParamKind,
+    pub name: String,
+    pub has_default: bool,
+    pub kind: FormalParamKind,
 }
 
 /// Represents a function in Python, either top-level,
