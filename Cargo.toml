@@ -3,9 +3,12 @@ name = "parse-py"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "parse_py"
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+pyo3 = { version = "0.18.1", features = ["extension-module"] }
 rayon = "1.6.1"
 rustpython-parser = "0.2.0"
 thiserror = "1"
