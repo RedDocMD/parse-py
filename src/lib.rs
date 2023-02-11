@@ -7,5 +7,8 @@ pub mod project;
 fn parse_py(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<object::py::SourceSpan>()?;
     m.add_class::<object::py::ObjectPath>()?;
+    m.add_class::<object::py::Object>()?;
+    m.add_class::<object::py::AltObject>()?;
+    m.add_class::<object::py::Module>()?;
     Ok(())
 }
