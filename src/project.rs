@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::object::{Module, ModuleCreator, Object, ObjectPath};
 
+pub mod py;
+
 pub struct Project {
     pub root: PathBuf,
     pub root_ob: Module,

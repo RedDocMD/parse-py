@@ -8,13 +8,15 @@ use std::{
 
 use rustpython_parser::ast::{Arg, Arguments, ExcepthandlerKind, Location, Stmt, StmtKind};
 
+pub mod py;
+
 /// Represents a span in a Python source file.
 /// This span typically denotes something, like a function or class.
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct SourceSpan {
-    path: PathBuf,
-    start: usize,
-    end: usize,
+    pub path: PathBuf,
+    pub start: usize,
+    pub end: usize,
 }
 
 // Represents a Python source element by its starting position
