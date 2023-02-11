@@ -14,9 +14,9 @@ pub mod py;
 /// This span typically denotes something, like a function or class.
 #[derive(PartialEq, Eq, Clone, Hash, Debug)]
 pub struct SourceSpan {
-    pub path: PathBuf,
-    pub start: usize,
-    pub end: usize,
+    path: PathBuf,
+    start: usize,
+    end: usize,
 }
 
 // Represents a Python source element by its starting position

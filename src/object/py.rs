@@ -21,7 +21,7 @@ pub struct SourceSpan {
 #[pymethods]
 impl SourceSpan {
     #[new]
-    fn py_new(filename: String, start_line: i32, end_line: i32) -> Self {
+    fn __new__(filename: String, start_line: i32, end_line: i32) -> Self {
         Self {
             filename,
             start_line,
@@ -71,4 +71,31 @@ pub struct ObjectPath {
 }
 
 #[pymethods]
-impl ObjectPath {}
+impl ObjectPath {
+    #[new]
+    fn __new__(components: Option<Vec<String>>) -> Self {
+        if let Some(components) = components {
+            Self { components }
+        } else {
+            Self {
+                components: Vec::new(),
+            }
+        }
+    }
+
+    fn append_part(&mut self, part: String) {
+        self.components.push(part);
+    }
+
+    fn __str__(&self) -> String {
+        self.components.join(".")
+    }
+}
+
+impl From<super::ObjectPath> for ObjectPath {
+    fn from(value: super::ObjectPath) -> Self {
+        Self {
+            components: value.components,
+        }
+    }
+}
