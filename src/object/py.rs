@@ -211,3 +211,23 @@ impl Module {
         self.__str__()
     }
 }
+
+#[pyclass(extends=Object)]
+#[derive(Clone, Debug)]
+pub struct Class;
+
+#[pymethods]
+impl Class {
+    #[new]
+    fn new(source_span: SourceSpan, name: String, object_path: ObjectPath) -> (Self, Object) {
+        (Self {}, Object::new(source_span, name, object_path))
+    }
+
+    fn __str__(&self) -> String {
+        "class".into()
+    }
+
+    fn __repr__(&self) -> String {
+        self.__str__()
+    }
+}
