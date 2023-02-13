@@ -3,18 +3,13 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use pyo3::{prelude::*, pyclass::CompareOp};
+use pyo3::{exceptions::PyValueError, prelude::*, pyclass::CompareOp};
 
-#[pyclass]
+#[pyclass(get_all, set_all)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceSpan {
-    #[pyo3(get, set)]
     filename: String,
-
-    #[pyo3(get, set)]
     start_line: i32,
-
-    #[pyo3(get, set)]
     end_line: i32,
 }
 
@@ -67,21 +62,12 @@ impl From<super::SourceSpan> for SourceSpan {
 pub struct ObjectPath {
     #[pyo3(get, set)]
     components: Vec<String>,
+
+    formatted_path: String,
 }
 
 #[pymethods]
 impl ObjectPath {
-    #[new]
-    fn new(components: Option<Vec<String>>) -> Self {
-        if let Some(components) = components {
-            Self { components }
-        } else {
-            Self {
-                components: Vec::new(),
-            }
-        }
-    }
-
     fn append_part(&mut self, part: String) {
         self.components.push(part);
     }
@@ -94,27 +80,18 @@ impl ObjectPath {
 impl From<super::ObjectPath> for ObjectPath {
     fn from(value: super::ObjectPath) -> Self {
         Self {
+            formatted_path: value.to_string(),
             components: value.components,
         }
     }
 }
 
-#[pyclass(subclass)]
+#[pyclass(subclass, get_all, set_all)]
 #[derive(Clone, Debug)]
 pub struct Object {
-    #[pyo3(get, set)]
     source_span: SourceSpan,
-
-    #[pyo3(get, set)]
     object_path: ObjectPath,
-
-    #[pyo3(get, set)]
-    children: HashMap<String, Object>,
-
-    #[pyo3(get, set)]
-    alt_counts: HashMap<String, i32>,
-
-    #[pyo3(get, set)]
+    children: HashMap<String, PyObject>,
     name: String,
 }
 
@@ -127,7 +104,6 @@ impl Object {
             object_path,
             name,
             children: HashMap::new(),
-            alt_counts: HashMap::new(),
         }
     }
 
@@ -165,13 +141,10 @@ impl Hash for Object {
     }
 }
 
-#[pyclass(extends=Object)]
+#[pyclass(extends=Object, get_all, set_all)]
 #[derive(Debug, Clone)]
 pub struct AltObject {
-    #[pyo3(get, set)]
     alt_name: String,
-
-    #[pyo3(get, set)]
     sub_ob: Object,
 }
 
@@ -229,5 +202,91 @@ impl Class {
 
     fn __repr__(&self) -> String {
         self.__str__()
+    }
+}
+
+#[pyclass]
+#[derive(Debug, Clone, Copy)]
+pub enum FormalParamKind {
+    POSONLY = 0,
+    NORMAL = 1,
+    KWONLY = 2,
+}
+
+impl From<super::FormalParamKind> for FormalParamKind {
+    fn from(value: super::FormalParamKind) -> Self {
+        match value {
+            super::FormalParamKind::PosOnly => Self::POSONLY,
+            super::FormalParamKind::KwOnly => Self::KWONLY,
+            super::FormalParamKind::Normal => Self::NORMAL,
+        }
+    }
+}
+
+#[pyclass(get_all, set_all)]
+#[derive(Debug, Clone)]
+pub struct FormalParam {
+    name: String,
+    has_default: bool,
+    kind: FormalParamKind,
+}
+
+#[pymethods]
+impl FormalParam {
+    #[new]
+    fn new(name: String, has_default: bool, kind: FormalParamKind) -> Self {
+        Self {
+            name,
+            has_default,
+            kind,
+        }
+    }
+}
+
+impl From<super::FormalParam> for FormalParam {
+    fn from(value: super::FormalParam) -> Self {
+        Self {
+            name: value.name,
+            has_default: value.has_default,
+            kind: value.kind.into(),
+        }
+    }
+}
+
+// FIXME: Add stmts
+#[pyclass(extends=Object)]
+#[derive(Clone, Debug)]
+pub struct Function {
+    formal_params: Vec<FormalParam>,
+    kwarg: Option<String>,
+    formatted_args: String,
+}
+
+#[pymethods]
+impl Function {
+    fn has_kwargs_dict(&self) -> bool {
+        self.kwarg.is_some()
+    }
+
+    fn get_kwargs_name(&self) -> PyResult<String> {
+        self.kwarg
+            .clone()
+            .ok_or_else(|| PyValueError::new_err("fn has not got keyword arguments"))
+    }
+
+    fn get_formal_params(&self) -> Vec<FormalParam> {
+        self.formal_params.clone()
+    }
+
+    fn __repr__(self_: PyRef<'_, Self>) -> String {
+        Function::__str__(self_)
+    }
+
+    fn __str__(self_: PyRef<'_, Self>) -> String {
+        let super_ = self_.as_ref();
+        format!(
+            "function {}({})",
+            super_.object_path.formatted_path, self_.formatted_args
+        )
     }
 }
