@@ -4,6 +4,7 @@ use std::{
 };
 
 use pyo3::{exceptions::PyValueError, prelude::*, pyclass::CompareOp};
+use rustpython_parser::ast::{ExprKind, StmtKind};
 
 #[pyclass(get_all, set_all)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -260,6 +261,9 @@ pub struct Function {
     formal_params: Vec<FormalParam>,
     kwarg: Option<String>,
     formatted_args: String,
+
+    #[pyo3(get, set)]
+    stmts: HashMap<i32, PyObject>,
 }
 
 #[pymethods]
@@ -288,5 +292,157 @@ impl Function {
             "function {}({})",
             super_.object_path.formatted_path, self_.formatted_args
         )
+    }
+}
+
+pub type SymbolTable<'a> = HashMap<&'static str, &'a PyAny>;
+
+fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
+    const SYMBOLS: [&str; 1] = ["Return"];
+
+    let ast = PyModule::import(py, "ast")?;
+    let mut table = SymbolTable::new();
+    for symbol in SYMBOLS {
+        let ob = ast.getattr(symbol)?;
+        table.insert(symbol, ob);
+    }
+    Ok(table)
+}
+
+fn expr_kind_to_py<'a>(
+    kind: ExprKind,
+    py: Python<'a>,
+    ast: &SymbolTable<'a>,
+) -> PyResult<&'a PyAny> {
+    match kind {
+        ExprKind::BoolOp { op, values } => todo!(),
+        ExprKind::NamedExpr { target, value } => todo!(),
+        ExprKind::BinOp { left, op, right } => todo!(),
+        ExprKind::UnaryOp { op, operand } => todo!(),
+        ExprKind::Lambda { args, body } => todo!(),
+        ExprKind::IfExp { test, body, orelse } => todo!(),
+        ExprKind::Dict { keys, values } => todo!(),
+        ExprKind::Set { elts } => todo!(),
+        ExprKind::ListComp { elt, generators } => todo!(),
+        ExprKind::SetComp { elt, generators } => todo!(),
+        ExprKind::DictComp {
+            key,
+            value,
+            generators,
+        } => todo!(),
+        ExprKind::GeneratorExp { elt, generators } => todo!(),
+        ExprKind::Await { value } => todo!(),
+        ExprKind::Yield { value } => todo!(),
+        ExprKind::YieldFrom { value } => todo!(),
+        ExprKind::Compare {
+            left,
+            ops,
+            comparators,
+        } => todo!(),
+        ExprKind::Call {
+            func,
+            args,
+            keywords,
+        } => todo!(),
+        ExprKind::FormattedValue {
+            value,
+            conversion,
+            format_spec,
+        } => todo!(),
+        ExprKind::JoinedStr { values } => todo!(),
+        ExprKind::Constant { value, kind } => todo!(),
+        ExprKind::Attribute { value, attr, ctx } => todo!(),
+        ExprKind::Subscript { value, slice, ctx } => todo!(),
+        ExprKind::Starred { value, ctx } => todo!(),
+        ExprKind::Name { id, ctx } => todo!(),
+        ExprKind::List { elts, ctx } => todo!(),
+        ExprKind::Tuple { elts, ctx } => todo!(),
+        ExprKind::Slice { lower, upper, step } => todo!(),
+    }
+}
+
+fn stmt_kind_to_py<'a>(
+    kind: StmtKind,
+    py: Python<'a>,
+    ast: &SymbolTable<'a>,
+) -> PyResult<&'a PyAny> {
+    let none = py.None();
+
+    match kind {
+        StmtKind::FunctionDef { .. } => unreachable!("FunctionDef shouldn't exist in stmts"),
+        StmtKind::AsyncFunctionDef { .. } => {
+            unreachable!("AsyncFunctionDef shouldn't exist in stmts")
+        }
+        StmtKind::ClassDef { .. } => unreachable!("ClassDef shouldn't exist in stmts"),
+        StmtKind::Return { value } => {
+            let return_class = ast["Return"];
+            let value_py = if let Some(value) = value {
+                expr_kind_to_py(value.node, py, ast)?
+            } else {
+                none.as_ref(py)
+            };
+            let return_val = return_class.call1((value_py,))?.downcast()?;
+            Ok(return_val)
+        }
+        StmtKind::Delete { targets } => todo!(),
+        StmtKind::Assign {
+            targets,
+            value,
+            type_comment,
+        } => todo!(),
+        StmtKind::AugAssign { target, op, value } => todo!(),
+        StmtKind::AnnAssign {
+            target,
+            annotation,
+            value,
+            simple,
+        } => todo!(),
+        StmtKind::For {
+            target,
+            iter,
+            body,
+            orelse,
+            type_comment,
+        } => todo!(),
+        StmtKind::AsyncFor {
+            target,
+            iter,
+            body,
+            orelse,
+            type_comment,
+        } => todo!(),
+        StmtKind::While { test, body, orelse } => todo!(),
+        StmtKind::If { test, body, orelse } => todo!(),
+        StmtKind::With {
+            items,
+            body,
+            type_comment,
+        } => todo!(),
+        StmtKind::AsyncWith {
+            items,
+            body,
+            type_comment,
+        } => todo!(),
+        StmtKind::Match { subject, cases } => todo!(),
+        StmtKind::Raise { exc, cause } => todo!(),
+        StmtKind::Try {
+            body,
+            handlers,
+            orelse,
+            finalbody,
+        } => todo!(),
+        StmtKind::Assert { test, msg } => todo!(),
+        StmtKind::Import { names } => todo!(),
+        StmtKind::ImportFrom {
+            module,
+            names,
+            level,
+        } => todo!(),
+        StmtKind::Global { names } => todo!(),
+        StmtKind::Nonlocal { names } => todo!(),
+        StmtKind::Expr { value } => todo!(),
+        StmtKind::Pass => todo!(),
+        StmtKind::Break => todo!(),
+        StmtKind::Continue => todo!(),
     }
 }
