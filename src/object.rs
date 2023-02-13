@@ -80,7 +80,7 @@ impl ObjectPath {
         self.components.last().unwrap()
     }
 
-    pub fn replaece_name(&mut self, new_name: String) {
+    pub fn replace_name(&mut self, new_name: String) {
         *self.components.last_mut().unwrap() = new_name;
     }
 }
@@ -354,7 +354,7 @@ impl AltObject {
         alt_cnt: i32,
     ) -> Self {
         let alt_name = format!("{}#{}", obj_path.name(), alt_cnt);
-        obj_path.replaece_name(alt_name);
+        obj_path.replace_name(alt_name);
         let data = ObjectData::new(source_span, obj_path);
         Self {
             data,
