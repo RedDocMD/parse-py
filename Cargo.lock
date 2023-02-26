@@ -444,6 +444,7 @@ dependencies = [
 name = "parse-py"
 version = "0.1.0"
 dependencies = [
+ "itertools",
  "pyo3",
  "rayon",
  "rustpython-parser",

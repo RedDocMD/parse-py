@@ -3,8 +3,14 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use pyo3::{exceptions::PyValueError, prelude::*, pyclass::CompareOp};
-use rustpython_parser::ast::{ExprKind, StmtKind};
+use itertools::Itertools;
+use pyo3::{
+    exceptions::PyValueError,
+    prelude::*,
+    pyclass::CompareOp,
+    types::{PyList, PyString},
+};
+use rustpython_parser::ast::{Expr, ExprContext, ExprKind, Operator, Stmt, StmtKind, Withitem};
 
 #[pyclass(get_all, set_all)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -298,15 +304,78 @@ impl Function {
 pub type SymbolTable<'a> = HashMap<&'static str, &'a PyAny>;
 
 fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
-    const SYMBOLS: [&str; 1] = ["Return"];
+    let symbols = [
+        "Return",
+        "Delete",
+        "Assign",
+        "AugAssign",
+        "Load",
+        "Store",
+        "Del",
+        "Name",
+        "Add",
+        "Sub",
+        "Mult",
+        "MatMult",
+        "Div",
+        "Mod",
+        "Pow",
+        "LShift",
+        "RShift",
+        "BitOr",
+        "BitXor",
+        "BitAnd",
+        "FloorDiv",
+        "AnnAssign",
+        "For",
+        "AsyncFor",
+        "While",
+        "If",
+        "withitem",
+        "With",
+        "AsyncWith",
+        "Pass",
+        "Continue",
+        "Break",
+    ];
 
     let ast = PyModule::import(py, "ast")?;
     let mut table = SymbolTable::new();
-    for symbol in SYMBOLS {
+    for symbol in symbols {
         let ob = ast.getattr(symbol)?;
         table.insert(symbol, ob);
     }
     Ok(table)
+}
+
+fn expr_ctx_to_py<'a>(ctx: ExprContext, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny> {
+    let class_name = match ctx {
+        ExprContext::Load => "Load",
+        ExprContext::Store => "Store",
+        ExprContext::Del => "Del",
+    };
+    let class = ast[class_name];
+    Ok(class.call0()?.downcast()?)
+}
+
+fn operator_to_py<'a>(op: Operator, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny> {
+    let class_name = match op {
+        Operator::Add => "Add",
+        Operator::Sub => "Sub",
+        Operator::Mult => "Mult",
+        Operator::MatMult => "MatMult",
+        Operator::Div => "Div",
+        Operator::Mod => "Mod",
+        Operator::Pow => "Pow",
+        Operator::LShift => "LShift",
+        Operator::RShift => "RShift",
+        Operator::BitOr => "BitOr",
+        Operator::BitXor => "BitXor",
+        Operator::BitAnd => "BitAnd",
+        Operator::FloorDiv => "FloorDiv",
+    };
+    let class = ast[class_name];
+    Ok(class.call0()?.downcast()?)
 }
 
 fn expr_kind_to_py<'a>(
@@ -314,6 +383,10 @@ fn expr_kind_to_py<'a>(
     py: Python<'a>,
     ast: &SymbolTable<'a>,
 ) -> PyResult<&'a PyAny> {
+    let none = py.None();
+
+    let str_to_py = |s: &str| PyString::new(py, s);
+
     match kind {
         ExprKind::BoolOp { op, values } => todo!(),
         ExprKind::NamedExpr { target, value } => todo!(),
@@ -354,11 +427,36 @@ fn expr_kind_to_py<'a>(
         ExprKind::Attribute { value, attr, ctx } => todo!(),
         ExprKind::Subscript { value, slice, ctx } => todo!(),
         ExprKind::Starred { value, ctx } => todo!(),
-        ExprKind::Name { id, ctx } => todo!(),
+        ExprKind::Name { id, ctx } => {
+            let name_class = ast["Name"];
+            let id_py = str_to_py(&id);
+            let ctx_py = expr_ctx_to_py(ctx, ast)?;
+            let name_py = name_class.call1((id_py, ctx_py))?.downcast()?;
+            Ok(name_py)
+        }
         ExprKind::List { elts, ctx } => todo!(),
         ExprKind::Tuple { elts, ctx } => todo!(),
         ExprKind::Slice { lower, upper, step } => todo!(),
     }
+}
+
+fn with_item_to_py<'a>(
+    with_item: Withitem,
+    py: Python<'a>,
+    ast: &SymbolTable<'a>,
+) -> PyResult<&'a PyAny> {
+    let none = py.None();
+    let context_expr_py = expr_kind_to_py(with_item.context_expr.node, py, ast)?;
+    let opt_var_py = if let Some(opt_var) = with_item.optional_vars {
+        expr_kind_to_py(opt_var.node, py, ast)?
+    } else {
+        none.as_ref(py)
+    };
+    let with_item_class = ast["withitem"];
+    let with_item_var = with_item_class
+        .call1((context_expr_py, opt_var_py))?
+        .downcast()?;
+    Ok(with_item_var)
 }
 
 fn stmt_kind_to_py<'a>(
@@ -368,6 +466,42 @@ fn stmt_kind_to_py<'a>(
 ) -> PyResult<&'a PyAny> {
     let none = py.None();
 
+    let expr_vec_to_list = |exprs: Vec<Expr>| -> PyResult<&PyList> {
+        Ok(PyList::new(
+            py,
+            exprs
+                .into_iter()
+                .map(|val| expr_kind_to_py(val.node, py, ast))
+                .try_collect::<_, Vec<_>, _>()?
+                .into_iter(),
+        ))
+    };
+    let stmt_vec_to_list = |exprs: Vec<Stmt>| -> PyResult<&PyList> {
+        Ok(PyList::new(
+            py,
+            exprs
+                .into_iter()
+                .map(|val| stmt_kind_to_py(val.node, py, ast))
+                .try_collect::<_, Vec<_>, _>()?
+                .into_iter(),
+        ))
+    };
+    let opt_expr_to_py = |expr: Option<Box<Expr>>| -> PyResult<&PyAny> {
+        if let Some(expr) = expr {
+            expr_kind_to_py(expr.node, py, ast)
+        } else {
+            Ok(none.as_ref(py))
+        }
+    };
+    let expr_to_py = |expr: Box<Expr>| expr_kind_to_py(expr.node, py, ast);
+    let opt_str_to_py = |s: Option<String>| -> PyResult<&PyString> {
+        if let Some(s) = s {
+            Ok(PyString::new(py, &s))
+        } else {
+            Ok(none.downcast(py)?)
+        }
+    };
+
     match kind {
         StmtKind::FunctionDef { .. } => unreachable!("FunctionDef shouldn't exist in stmts"),
         StmtKind::AsyncFunctionDef { .. } => {
@@ -376,53 +510,151 @@ fn stmt_kind_to_py<'a>(
         StmtKind::ClassDef { .. } => unreachable!("ClassDef shouldn't exist in stmts"),
         StmtKind::Return { value } => {
             let return_class = ast["Return"];
-            let value_py = if let Some(value) = value {
-                expr_kind_to_py(value.node, py, ast)?
-            } else {
-                none.as_ref(py)
-            };
+            let value_py = opt_expr_to_py(value)?;
             let return_val = return_class.call1((value_py,))?.downcast()?;
             Ok(return_val)
         }
-        StmtKind::Delete { targets } => todo!(),
+        StmtKind::Delete { targets } => {
+            let delete_class = ast["Delete"];
+            let targets_py = expr_vec_to_list(targets)?;
+            let delete_val = delete_class.call1((targets_py,))?.downcast()?;
+            Ok(delete_val)
+        }
         StmtKind::Assign {
             targets,
             value,
             type_comment,
-        } => todo!(),
-        StmtKind::AugAssign { target, op, value } => todo!(),
+        } => {
+            let assign_class = ast["Assign"];
+            let targets_py = expr_vec_to_list(targets)?;
+            let value_py = expr_to_py(value)?;
+            let type_comment_py = opt_str_to_py(type_comment)?;
+            let assign_val = assign_class
+                .call1((targets_py, value_py, type_comment_py))?
+                .downcast()?;
+            Ok(assign_val)
+        }
+        StmtKind::AugAssign { target, op, value } => {
+            let aug_assign_class = ast["AugAssign"];
+            let target_py = expr_to_py(target)?;
+            let op_py = operator_to_py(op, ast)?;
+            let value_py = expr_to_py(value)?;
+            let aug_assign_val = aug_assign_class
+                .call1((target_py, op_py, value_py))?
+                .downcast()?;
+            Ok(aug_assign_val)
+        }
         StmtKind::AnnAssign {
             target,
             annotation,
             value,
             simple,
-        } => todo!(),
+        } => {
+            let ann_assign_class = ast["AnnAssign"];
+            let target_py = expr_to_py(target)?;
+            let annotation_py = expr_to_py(annotation)?;
+            let value_py = opt_expr_to_py(value)?;
+            let ann_assign_val = ann_assign_class
+                .call1((target_py, annotation_py, value_py, simple))?
+                .downcast()?;
+            Ok(ann_assign_val)
+        }
         StmtKind::For {
             target,
             iter,
             body,
             orelse,
             type_comment,
-        } => todo!(),
+        } => {
+            let for_class = ast["For"];
+            let target_py = expr_to_py(target)?;
+            let iter_py = expr_to_py(iter)?;
+            let body_py = stmt_vec_to_list(body)?;
+            let orelse_py = stmt_vec_to_list(orelse)?;
+            let type_comment_py = opt_str_to_py(type_comment)?;
+            let for_val = for_class
+                .call1((target_py, iter_py, body_py, orelse_py, type_comment_py))?
+                .downcast()?;
+            Ok(for_val)
+        }
         StmtKind::AsyncFor {
             target,
             iter,
             body,
             orelse,
             type_comment,
-        } => todo!(),
-        StmtKind::While { test, body, orelse } => todo!(),
-        StmtKind::If { test, body, orelse } => todo!(),
+        } => {
+            let async_for_class = ast["AsyncFor"];
+            let target_py = expr_to_py(target)?;
+            let iter_py = expr_to_py(iter)?;
+            let body_py = stmt_vec_to_list(body)?;
+            let orelse_py = stmt_vec_to_list(orelse)?;
+            let type_comment_py = opt_str_to_py(type_comment)?;
+            let async_for_val = async_for_class
+                .call1((target_py, iter_py, body_py, orelse_py, type_comment_py))?
+                .downcast()?;
+            Ok(async_for_val)
+        }
+        StmtKind::While { test, body, orelse } => {
+            let while_class = ast["While"];
+            let test_py = expr_to_py(test)?;
+            let body_py = stmt_vec_to_list(body)?;
+            let orelse_py = stmt_vec_to_list(orelse)?;
+            let while_val = while_class
+                .call1((test_py, body_py, orelse_py))?
+                .downcast()?;
+            Ok(while_val)
+        }
+        StmtKind::If { test, body, orelse } => {
+            let if_class = ast["If"];
+            let test_py = expr_to_py(test)?;
+            let body_py = stmt_vec_to_list(body)?;
+            let orelse_py = stmt_vec_to_list(orelse)?;
+            let if_val = if_class.call1((test_py, body_py, orelse_py))?.downcast()?;
+            Ok(if_val)
+        }
         StmtKind::With {
             items,
             body,
             type_comment,
-        } => todo!(),
+        } => {
+            let with_class = ast["With"];
+            let items_py = PyList::new(
+                py,
+                items
+                    .into_iter()
+                    .map(|item| with_item_to_py(item, py, ast))
+                    .try_collect::<_, Vec<_>, _>()?
+                    .into_iter(),
+            );
+            let body_py = stmt_vec_to_list(body)?;
+            let type_comment_py = opt_str_to_py(type_comment)?;
+            let with_val = with_class
+                .call1((items_py, body_py, type_comment_py))?
+                .downcast()?;
+            Ok(with_val)
+        }
         StmtKind::AsyncWith {
             items,
             body,
             type_comment,
-        } => todo!(),
+        } => {
+            let async_with_class = ast["AsyncWith"];
+            let items_py = PyList::new(
+                py,
+                items
+                    .into_iter()
+                    .map(|item| with_item_to_py(item, py, ast))
+                    .try_collect::<_, Vec<_>, _>()?
+                    .into_iter(),
+            );
+            let body_py = stmt_vec_to_list(body)?;
+            let type_comment_py = opt_str_to_py(type_comment)?;
+            let async_with_val = async_with_class
+                .call1((items_py, body_py, type_comment_py))?
+                .downcast()?;
+            Ok(async_with_val)
+        }
         StmtKind::Match { subject, cases } => todo!(),
         StmtKind::Raise { exc, cause } => todo!(),
         StmtKind::Try {
@@ -440,9 +672,33 @@ fn stmt_kind_to_py<'a>(
         } => todo!(),
         StmtKind::Global { names } => todo!(),
         StmtKind::Nonlocal { names } => todo!(),
-        StmtKind::Expr { value } => todo!(),
-        StmtKind::Pass => todo!(),
-        StmtKind::Break => todo!(),
-        StmtKind::Continue => todo!(),
+        StmtKind::Expr { value } => expr_to_py(value),
+        StmtKind::Pass => Ok(ast["Pass"].call0()?.downcast()?),
+        StmtKind::Break => Ok(ast["Break"].call0()?.downcast()?),
+        StmtKind::Continue => Ok(ast["Continue"].call0()?.downcast()?),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rustpython_parser::parser::parse_program;
+
+    use super::*;
+
+    fn parse_single_stmt(stmt: &str) -> StmtKind {
+        let stmts = parse_program(stmt, "file.py").unwrap();
+        stmts.into_iter().next().unwrap().node
+    }
+
+    #[test]
+    fn test_stmt_kind_del() {
+        pyo3::prepare_freethreaded_python();
+
+        let del_stmt = parse_single_stmt("del a");
+
+        Python::with_gil(|py| {
+            let ast = get_ast_symbol_table(py).unwrap();
+            let _ = stmt_kind_to_py(del_stmt, py, &ast).unwrap();
+        });
     }
 }
