@@ -8,9 +8,12 @@ use pyo3::{
     exceptions::PyValueError,
     prelude::*,
     pyclass::CompareOp,
-    types::{PyList, PyString},
+    types::{PyComplex, PyList, PyString, PyTuple},
 };
-use rustpython_parser::ast::{Expr, ExprContext, ExprKind, Operator, Stmt, StmtKind, Withitem};
+use rustpython_parser::ast::{
+    Constant, Expr, ExprContext, ExprKind, MatchCase, Operator, PatternKind, Stmt, StmtKind,
+    Withitem,
+};
 
 #[pyclass(get_all, set_all)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -337,6 +340,18 @@ fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
         "Pass",
         "Continue",
         "Break",
+        "Expr",
+        "MatchValue",
+        "Constant",
+        "MatchSingleton",
+        "MatchSequence",
+        "MatchMapping",
+        "MatchClass",
+        "MatchStar",
+        "MatchAs",
+        "MatchOr",
+        "match_case",
+        "Match",
     ];
 
     let ast = PyModule::import(py, "ast")?;
@@ -457,6 +472,156 @@ fn with_item_to_py<'a>(
         .call1((context_expr_py, opt_var_py))?
         .downcast()?;
     Ok(with_item_var)
+}
+
+fn constant_to_py<'a>(
+    kind: Constant,
+    py: Python<'a>,
+    ast: &SymbolTable<'a>,
+) -> PyResult<&'a PyAny> {
+    let none = py.None();
+    let ellipsis = py.Ellipsis();
+
+    let value_py = match kind {
+        Constant::None => none,
+        Constant::Bool(b) => b.into_py(py),
+        Constant::Str(s) => s.into_py(py),
+        Constant::Bytes(b) => b.into_py(py),
+        // FIXME: Handle BigInt properly
+        Constant::Int(i) => 1.into_py(py),
+        Constant::Tuple(t) => PyTuple::new(
+            py,
+            t.into_iter()
+                .map(|c| constant_to_py(c, py, ast))
+                .try_collect::<_, Vec<_>, _>()?,
+        )
+        .into_py(py),
+        Constant::Float(f) => f.into_py(py),
+        Constant::Complex { real, imag } => PyComplex::from_doubles(py, real, imag).into_py(py),
+        Constant::Ellipsis => ellipsis,
+    };
+
+    let class = ast["Constant"];
+    let class_val = class.call1((value_py,))?.downcast()?;
+    Ok(class_val)
+}
+
+fn match_pattern_to_py<'a>(
+    kind: PatternKind,
+    py: Python<'a>,
+    ast: &SymbolTable<'a>,
+) -> PyResult<&'a PyAny> {
+    let none = py.None();
+
+    let expr_to_py = |expr: Box<Expr>| expr_kind_to_py(expr.node, py, ast);
+
+    match kind {
+        PatternKind::MatchValue { value } => {
+            let class = ast["MatchValue"];
+            let value_py = expr_to_py(value)?;
+            let class_val = class.call1((value_py,))?.downcast()?;
+            Ok(class_val)
+        }
+        PatternKind::MatchSingleton { value } => {
+            let class = ast["MatchSingleton"];
+            let value_py = constant_to_py(value, py, ast)?;
+            let class_val = class.call1((value_py,))?.downcast()?;
+            Ok(class_val)
+        }
+        PatternKind::MatchSequence { patterns } => {
+            let class = ast["MatchSequence"];
+            let patterns_py = patterns
+                .into_iter()
+                .map(|c| match_pattern_to_py(c.node, py, ast))
+                .try_collect::<_, Vec<_>, _>()?;
+            let class_val = class.call1((patterns_py,))?.downcast()?;
+            Ok(class_val)
+        }
+        PatternKind::MatchMapping {
+            keys,
+            patterns,
+            rest,
+        } => {
+            let class = ast["MatchMapping"];
+            let keys_py = keys
+                .into_iter()
+                .map(|c| expr_kind_to_py(c.node, py, ast))
+                .try_collect::<_, Vec<_>, _>()?;
+            let patterns_py = patterns
+                .into_iter()
+                .map(|c| match_pattern_to_py(c.node, py, ast))
+                .try_collect::<_, Vec<_>, _>()?;
+            let class_val = class.call1((keys_py, patterns_py, rest))?.downcast()?;
+            Ok(class_val)
+        }
+        PatternKind::MatchClass {
+            cls,
+            patterns,
+            kwd_attrs,
+            kwd_patterns,
+        } => {
+            let class = ast["MatchClass"];
+            let cls_py = expr_to_py(cls)?;
+            let patterns_py = patterns
+                .into_iter()
+                .map(|c| match_pattern_to_py(c.node, py, ast))
+                .try_collect::<_, Vec<_>, _>()?;
+            let kwd_patterns_py = kwd_patterns
+                .into_iter()
+                .map(|c| match_pattern_to_py(c.node, py, ast))
+                .try_collect::<_, Vec<_>, _>()?;
+            let class_val = class
+                .call1((cls_py, patterns_py, kwd_attrs, kwd_patterns_py))?
+                .downcast()?;
+            Ok(class_val)
+        }
+        PatternKind::MatchStar { name } => {
+            let class = ast["MatchStar"];
+            let class_val = class.call1((name,))?.downcast()?;
+            Ok(class_val)
+        }
+        PatternKind::MatchAs { pattern, name } => {
+            let class = ast["MatchAs"];
+            let pattern_py = if let Some(pattern) = pattern {
+                match_pattern_to_py(pattern.node, py, ast)?
+            } else {
+                none.as_ref(py)
+            };
+            let class_val = class.call1((pattern_py, name))?.downcast()?;
+            Ok(class_val)
+        }
+        PatternKind::MatchOr { patterns } => {
+            let class = ast["MatchOr"];
+            let patterns_py = patterns
+                .into_iter()
+                .map(|c| match_pattern_to_py(c.node, py, ast))
+                .try_collect::<_, Vec<_>, _>()?;
+            let class_val = class.call1((patterns_py,))?.downcast()?;
+            Ok(class_val)
+        }
+    }
+}
+
+fn match_case_to_py<'a>(
+    mc: MatchCase,
+    py: Python<'a>,
+    ast: &SymbolTable<'a>,
+) -> PyResult<&'a PyAny> {
+    let none = py.None();
+    let class = ast["match_case"];
+    let pattern_py = match_pattern_to_py(mc.pattern.node, py, ast)?;
+    let guard_py = if let Some(guard) = mc.guard {
+        expr_kind_to_py(guard.node, py, ast)?
+    } else {
+        none.as_ref(py)
+    };
+    let body_py = mc
+        .body
+        .into_iter()
+        .map(|val| stmt_kind_to_py(val.node, py, ast))
+        .try_collect::<_, Vec<_>, _>()?;
+    let class_val = class.call1((pattern_py, guard_py, body_py))?.downcast()?;
+    Ok(class_val)
 }
 
 fn stmt_kind_to_py<'a>(
@@ -655,7 +820,16 @@ fn stmt_kind_to_py<'a>(
                 .downcast()?;
             Ok(async_with_val)
         }
-        StmtKind::Match { subject, cases } => todo!(),
+        StmtKind::Match { subject, cases } => {
+            let class = ast["Match"];
+            let subject_py = expr_to_py(subject)?;
+            let cases_py = cases
+                .into_iter()
+                .map(|c| match_case_to_py(c, py, ast))
+                .try_collect::<_, Vec<_>, _>()?;
+            let class_val = class.call1((subject_py, cases_py))?.downcast()?;
+            Ok(class_val)
+        }
         StmtKind::Raise { exc, cause } => todo!(),
         StmtKind::Try {
             body,
@@ -672,7 +846,12 @@ fn stmt_kind_to_py<'a>(
         } => todo!(),
         StmtKind::Global { names } => todo!(),
         StmtKind::Nonlocal { names } => todo!(),
-        StmtKind::Expr { value } => expr_to_py(value),
+        StmtKind::Expr { value } => {
+            let expr_class = ast["Expr"];
+            let value_py = expr_to_py(value)?;
+            let expr_val = expr_class.call1((value_py,))?.downcast()?;
+            Ok(expr_val)
+        }
         StmtKind::Pass => Ok(ast["Pass"].call0()?.downcast()?),
         StmtKind::Break => Ok(ast["Break"].call0()?.downcast()?),
         StmtKind::Continue => Ok(ast["Continue"].call0()?.downcast()?),
