@@ -11,8 +11,8 @@ use pyo3::{
     types::{PyComplex, PyList, PyString, PyTuple},
 };
 use rustpython_parser::ast::{
-    Constant, Expr, ExprContext, ExprKind, MatchCase, Operator, PatternKind, Stmt, StmtKind,
-    Withitem,
+    Alias, Constant, Excepthandler, ExcepthandlerKind, Expr, ExprContext, ExprKind, MatchCase,
+    Operator, PatternKind, Stmt, StmtKind, Withitem,
 };
 
 #[pyclass(get_all, set_all)]
@@ -352,6 +352,15 @@ fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
         "MatchOr",
         "match_case",
         "Match",
+        "Raise",
+        "Try",
+        "ExceptHandler",
+        "Assert",
+        "Import",
+        "ImportFrom",
+        "Global",
+        "Nonlocal",
+        "alias",
     ];
 
     let ast = PyModule::import(py, "ast")?;
@@ -666,6 +675,22 @@ fn stmt_kind_to_py<'a>(
             Ok(none.downcast(py)?)
         }
     };
+    let except_to_py = |e: Excepthandler| -> PyResult<&PyAny> {
+        match e.node {
+            ExcepthandlerKind::ExceptHandler { type_, name, body } => {
+                let class = ast["ExceptHandler"];
+                let type_py = opt_expr_to_py(type_)?;
+                let body_py = stmt_vec_to_list(body)?;
+                let class_val = class.call1((type_py, name, body_py))?.downcast()?;
+                Ok(class_val)
+            }
+        }
+    };
+    let alias_to_py = |a: Alias| -> PyResult<&PyAny> {
+        let class = ast["alias"];
+        let class_val = class.call1((a.node.name, a.node.asname))?.downcast()?;
+        Ok(class_val)
+    };
 
     match kind {
         StmtKind::FunctionDef { .. } => unreachable!("FunctionDef shouldn't exist in stmts"),
@@ -830,22 +855,54 @@ fn stmt_kind_to_py<'a>(
             let class_val = class.call1((subject_py, cases_py))?.downcast()?;
             Ok(class_val)
         }
-        StmtKind::Raise { exc, cause } => todo!(),
+        StmtKind::Raise { exc, cause } => {
+            let class = ast["Raise"];
+            let exc_py = opt_expr_to_py(exc)?;
+            let cause_py = opt_expr_to_py(cause)?;
+            let class_val = class.call1((exc_py, cause_py))?.downcast()?;
+            Ok(class_val)
+        }
         StmtKind::Try {
             body,
             handlers,
             orelse,
             finalbody,
-        } => todo!(),
-        StmtKind::Assert { test, msg } => todo!(),
-        StmtKind::Import { names } => todo!(),
+        } => {
+            let class = ast["Try"];
+            let body_py = stmt_vec_to_list(body)?;
+            let handlers_py: Vec<_> = handlers.into_iter().map(except_to_py).try_collect()?;
+            let orelse_py = stmt_vec_to_list(orelse)?;
+            let finalbody_py = stmt_vec_to_list(finalbody)?;
+            let class_val = class
+                .call1((body_py, handlers_py, orelse_py, finalbody_py))?
+                .downcast()?;
+            Ok(class_val)
+        }
+        StmtKind::Assert { test, msg } => {
+            let class = ast["Assert"];
+            let test = expr_to_py(test)?;
+            let msg = opt_expr_to_py(msg)?;
+            let class_val = class.call1((test, msg))?.downcast()?;
+            Ok(class_val)
+        }
+        StmtKind::Import { names } => {
+            let class = ast["Import"];
+            let names: Vec<_> = names.into_iter().map(alias_to_py).try_collect()?;
+            let class_val = class.call1((names,))?.downcast()?;
+            Ok(class_val)
+        }
         StmtKind::ImportFrom {
             module,
             names,
             level,
-        } => todo!(),
-        StmtKind::Global { names } => todo!(),
-        StmtKind::Nonlocal { names } => todo!(),
+        } => {
+            let class = ast["ImportFrom"];
+            let names: Vec<_> = names.into_iter().map(alias_to_py).try_collect()?;
+            let class_val = class.call1((module, names, level))?.downcast()?;
+            Ok(class_val)
+        }
+        StmtKind::Global { names } => Ok(ast["Global"].call1((names,))?.downcast()?),
+        StmtKind::Nonlocal { names } => Ok(ast["Nonlocal"].call1((names,))?.downcast()?),
         StmtKind::Expr { value } => {
             let expr_class = ast["Expr"];
             let value_py = expr_to_py(value)?;
