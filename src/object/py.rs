@@ -11,8 +11,8 @@ use pyo3::{
     types::{PyComplex, PyList, PyString, PyTuple},
 };
 use rustpython_parser::ast::{
-    Alias, Constant, Excepthandler, ExcepthandlerKind, Expr, ExprContext, ExprKind, MatchCase,
-    Operator, PatternKind, Stmt, StmtKind, Withitem,
+    Alias, Boolop, Constant, Excepthandler, ExcepthandlerKind, Expr, ExprContext, ExprKind,
+    MatchCase, Operator, PatternKind, Stmt, StmtKind, Withitem,
 };
 
 #[pyclass(get_all, set_all)]
@@ -361,6 +361,11 @@ fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
         "Global",
         "Nonlocal",
         "alias",
+        "And",
+        "Or",
+        "BoolOp",
+        "NamedExpr",
+        "BinOp",
     ];
 
     let ast = PyModule::import(py, "ast")?;
@@ -402,6 +407,15 @@ fn operator_to_py<'a>(op: Operator, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny
     Ok(class.call0()?.downcast()?)
 }
 
+fn bool_op_to_py<'a>(op: Boolop, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny> {
+    let class_name = match op {
+        Boolop::And => "And",
+        Boolop::Or => "Or",
+    };
+    let class = ast[class_name];
+    Ok(class.call0()?.downcast()?)
+}
+
 fn expr_kind_to_py<'a>(
     kind: ExprKind,
     py: Python<'a>,
@@ -410,11 +424,37 @@ fn expr_kind_to_py<'a>(
     let none = py.None();
 
     let str_to_py = |s: &str| PyString::new(py, s);
+    let expr_to_py = |expr: Box<Expr>| expr_kind_to_py(expr.node, py, ast);
+    let expr_vec_to_py = |exprs: Vec<Expr>| -> PyResult<Vec<_>> {
+        exprs
+            .into_iter()
+            .map(|e| expr_kind_to_py(e.node, py, ast))
+            .try_collect()
+    };
 
     match kind {
-        ExprKind::BoolOp { op, values } => todo!(),
-        ExprKind::NamedExpr { target, value } => todo!(),
-        ExprKind::BinOp { left, op, right } => todo!(),
+        ExprKind::BoolOp { op, values } => {
+            let class = ast["BoolOp"];
+            let op = bool_op_to_py(op, ast)?;
+            let values = expr_vec_to_py(values)?;
+            let class_val = class.call1((op, values))?.downcast()?;
+            Ok(class_val)
+        }
+        ExprKind::NamedExpr { target, value } => {
+            let class = ast["NamedExpr"];
+            let target = expr_to_py(target)?;
+            let value = expr_to_py(value)?;
+            let class_py = class.call1((target, value))?.downcast()?;
+            Ok(class_py)
+        }
+        ExprKind::BinOp { left, op, right } => {
+            let class = ast["BinOp"];
+            let left = expr_to_py(left)?;
+            let op = operator_to_py(op, ast)?;
+            let right = expr_to_py(right)?;
+            let class_py = class.call1((left, op, right))?.downcast()?;
+            Ok(class_py)
+        }
         ExprKind::UnaryOp { op, operand } => todo!(),
         ExprKind::Lambda { args, body } => todo!(),
         ExprKind::IfExp { test, body, orelse } => todo!(),
@@ -668,13 +708,6 @@ fn stmt_kind_to_py<'a>(
         }
     };
     let expr_to_py = |expr: Box<Expr>| expr_kind_to_py(expr.node, py, ast);
-    let opt_str_to_py = |s: Option<String>| -> PyResult<&PyString> {
-        if let Some(s) = s {
-            Ok(PyString::new(py, &s))
-        } else {
-            Ok(none.downcast(py)?)
-        }
-    };
     let except_to_py = |e: Excepthandler| -> PyResult<&PyAny> {
         match e.node {
             ExcepthandlerKind::ExceptHandler { type_, name, body } => {
@@ -718,9 +751,8 @@ fn stmt_kind_to_py<'a>(
             let assign_class = ast["Assign"];
             let targets_py = expr_vec_to_list(targets)?;
             let value_py = expr_to_py(value)?;
-            let type_comment_py = opt_str_to_py(type_comment)?;
             let assign_val = assign_class
-                .call1((targets_py, value_py, type_comment_py))?
+                .call1((targets_py, value_py, type_comment))?
                 .downcast()?;
             Ok(assign_val)
         }
@@ -761,9 +793,8 @@ fn stmt_kind_to_py<'a>(
             let iter_py = expr_to_py(iter)?;
             let body_py = stmt_vec_to_list(body)?;
             let orelse_py = stmt_vec_to_list(orelse)?;
-            let type_comment_py = opt_str_to_py(type_comment)?;
             let for_val = for_class
-                .call1((target_py, iter_py, body_py, orelse_py, type_comment_py))?
+                .call1((target_py, iter_py, body_py, orelse_py, type_comment))?
                 .downcast()?;
             Ok(for_val)
         }
@@ -779,9 +810,8 @@ fn stmt_kind_to_py<'a>(
             let iter_py = expr_to_py(iter)?;
             let body_py = stmt_vec_to_list(body)?;
             let orelse_py = stmt_vec_to_list(orelse)?;
-            let type_comment_py = opt_str_to_py(type_comment)?;
             let async_for_val = async_for_class
-                .call1((target_py, iter_py, body_py, orelse_py, type_comment_py))?
+                .call1((target_py, iter_py, body_py, orelse_py, type_comment))?
                 .downcast()?;
             Ok(async_for_val)
         }
@@ -818,9 +848,8 @@ fn stmt_kind_to_py<'a>(
                     .into_iter(),
             );
             let body_py = stmt_vec_to_list(body)?;
-            let type_comment_py = opt_str_to_py(type_comment)?;
             let with_val = with_class
-                .call1((items_py, body_py, type_comment_py))?
+                .call1((items_py, body_py, type_comment))?
                 .downcast()?;
             Ok(with_val)
         }
@@ -839,9 +868,8 @@ fn stmt_kind_to_py<'a>(
                     .into_iter(),
             );
             let body_py = stmt_vec_to_list(body)?;
-            let type_comment_py = opt_str_to_py(type_comment)?;
             let async_with_val = async_with_class
-                .call1((items_py, body_py, type_comment_py))?
+                .call1((items_py, body_py, type_comment))?
                 .downcast()?;
             Ok(async_with_val)
         }
@@ -935,6 +963,23 @@ mod tests {
         Python::with_gil(|py| {
             let ast = get_ast_symbol_table(py).unwrap();
             let _ = stmt_kind_to_py(del_stmt, py, &ast).unwrap();
+        });
+    }
+
+    #[test]
+    fn test_stmt_kind_for() {
+        pyo3::prepare_freethreaded_python();
+
+        let for_stmt = parse_single_stmt(
+            "
+for a in b:
+    a + c
+",
+        );
+
+        Python::with_gil(|py| {
+            let ast = get_ast_symbol_table(py).unwrap();
+            let _ = stmt_kind_to_py(for_stmt, py, &ast).unwrap();
         });
     }
 }
