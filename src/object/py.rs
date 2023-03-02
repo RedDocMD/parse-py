@@ -12,7 +12,7 @@ use pyo3::{
 };
 use rustpython_parser::ast::{
     Alias, Boolop, Constant, Excepthandler, ExcepthandlerKind, Expr, ExprContext, ExprKind,
-    MatchCase, Operator, PatternKind, Stmt, StmtKind, Withitem,
+    MatchCase, Operator, PatternKind, Stmt, StmtKind, Unaryop, Withitem,
 };
 
 #[pyclass(get_all, set_all)]
@@ -366,6 +366,14 @@ fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
         "BoolOp",
         "NamedExpr",
         "BinOp",
+        "Invert",
+        "Add",
+        "UAdd",
+        "USub",
+        "UnaryOp",
+        "IfExp",
+        "Dict",
+        "Set",
     ];
 
     let ast = PyModule::import(py, "ast")?;
@@ -416,6 +424,17 @@ fn bool_op_to_py<'a>(op: Boolop, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny> {
     Ok(class.call0()?.downcast()?)
 }
 
+fn unary_op_to_py<'a>(op: Unaryop, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny> {
+    let class_name = match op {
+        Unaryop::Invert => "Invert",
+        Unaryop::Not => "Not",
+        Unaryop::UAdd => "UAdd",
+        Unaryop::USub => "USub",
+    };
+    let class = ast[class_name];
+    Ok(class.call0()?.downcast()?)
+}
+
 fn expr_kind_to_py<'a>(
     kind: ExprKind,
     py: Python<'a>,
@@ -455,11 +474,35 @@ fn expr_kind_to_py<'a>(
             let class_py = class.call1((left, op, right))?.downcast()?;
             Ok(class_py)
         }
-        ExprKind::UnaryOp { op, operand } => todo!(),
+        ExprKind::UnaryOp { op, operand } => {
+            let class = ast["UnaryOp"];
+            let op = unary_op_to_py(op, ast)?;
+            let operand = expr_to_py(operand)?;
+            let class_py = class.call1((op, operand))?.downcast()?;
+            Ok(class_py)
+        }
         ExprKind::Lambda { args, body } => todo!(),
-        ExprKind::IfExp { test, body, orelse } => todo!(),
-        ExprKind::Dict { keys, values } => todo!(),
-        ExprKind::Set { elts } => todo!(),
+        ExprKind::IfExp { test, body, orelse } => {
+            let class = ast["IfExp"];
+            let test = expr_to_py(test)?;
+            let body = expr_to_py(body)?;
+            let orelse = expr_to_py(orelse)?;
+            let class_val = class.call1((test, body, orelse))?.downcast()?;
+            Ok(class_val)
+        }
+        ExprKind::Dict { keys, values } => {
+            let class = ast["Dict"];
+            let keys = expr_vec_to_py(keys)?;
+            let values = expr_vec_to_py(values)?;
+            let class_val = class.call1((keys, values))?.downcast()?;
+            Ok(class_val)
+        }
+        ExprKind::Set { elts } => {
+            let class = ast["Set"];
+            let elts = expr_vec_to_py(elts)?;
+            let class_val = class.call1((elts,))?.downcast()?;
+            Ok(class_val)
+        }
         ExprKind::ListComp { elt, generators } => todo!(),
         ExprKind::SetComp { elt, generators } => todo!(),
         ExprKind::DictComp {
