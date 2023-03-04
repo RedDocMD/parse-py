@@ -11,8 +11,9 @@ use pyo3::{
     types::{PyComplex, PyList, PyString, PyTuple},
 };
 use rustpython_parser::ast::{
-    Alias, Boolop, Cmpop, Constant, Excepthandler, ExcepthandlerKind, Expr, ExprContext, ExprKind,
-    MatchCase, Operator, PatternKind, Stmt, StmtKind, Unaryop, Withitem,
+    Alias, Boolop, Cmpop, Comprehension, Constant, Excepthandler, ExcepthandlerKind, Expr,
+    ExprContext, ExprKind, KeywordData, MatchCase, Operator, PatternKind, Stmt, StmtKind, Unaryop,
+    Withitem,
 };
 
 #[pyclass(get_all, set_all)]
@@ -397,6 +398,13 @@ fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
         "List",
         "Tuple",
         "Slice",
+        "keyword",
+        "Call",
+        "comprehension",
+        "ListComp",
+        "SetComp",
+        "GeneratorExp",
+        "DictComp",
     ];
 
     let ast = PyModule::import(py, "ast")?;
@@ -489,6 +497,7 @@ fn expr_kind_to_py<'a>(
 
     let str_to_py = |s: &str| PyString::new(py, s);
     let expr_to_py = |expr: Box<Expr>| expr_kind_to_py(expr.node, py, ast);
+
     let expr_vec_to_py = |exprs: Vec<Expr>| -> PyResult<Vec<_>> {
         exprs
             .into_iter()
@@ -496,6 +505,29 @@ fn expr_kind_to_py<'a>(
             .try_collect()
     };
     let opt_expr_to_py = |expr: Option<Box<Expr>>| expr.map(expr_to_py).transpose();
+
+    let keyword_data_to_py = |data: KeywordData| -> PyResult<&PyAny> {
+        let value = expr_kind_to_py(data.value.node, py, ast)?;
+        py_value!(ast, "keyword", data.arg, value)
+    };
+
+    let comprehension_to_py = |comprehension: Comprehension| -> PyResult<&PyAny> {
+        let target = expr_kind_to_py(comprehension.target.node, py, ast)?;
+        let iter = expr_kind_to_py(comprehension.iter.node, py, ast)?;
+        let ifs = expr_vec_to_py(comprehension.ifs)?;
+        py_value!(
+            ast,
+            "comprehension",
+            target,
+            iter,
+            ifs,
+            comprehension.is_async
+        )
+    };
+
+    let comprehension_vec_to_py = |cprs: Vec<Comprehension>| -> PyResult<Vec<&PyAny>> {
+        cprs.into_iter().map(comprehension_to_py).try_collect()
+    };
 
     match kind {
         ExprKind::BoolOp { op, values } => {
@@ -535,14 +567,31 @@ fn expr_kind_to_py<'a>(
             let elts = expr_vec_to_py(elts)?;
             py_value!(ast, "Set", elts)
         }
-        ExprKind::ListComp { elt, generators } => todo!(),
-        ExprKind::SetComp { elt, generators } => todo!(),
+        ExprKind::ListComp { elt, generators } => {
+            let elt = expr_to_py(elt)?;
+            let generators = comprehension_vec_to_py(generators)?;
+            py_value!(ast, "ListComp", elt, generators)
+        }
+        ExprKind::SetComp { elt, generators } => {
+            let elt = expr_to_py(elt)?;
+            let generators = comprehension_vec_to_py(generators)?;
+            py_value!(ast, "SetComp", elt, generators)
+        }
         ExprKind::DictComp {
             key,
             value,
             generators,
-        } => todo!(),
-        ExprKind::GeneratorExp { elt, generators } => todo!(),
+        } => {
+            let key = expr_to_py(key)?;
+            let value = expr_to_py(value)?;
+            let generators = comprehension_vec_to_py(generators)?;
+            py_value!(ast, "DictComp", key, value, generators)
+        }
+        ExprKind::GeneratorExp { elt, generators } => {
+            let elt = expr_to_py(elt)?;
+            let generators = comprehension_vec_to_py(generators)?;
+            py_value!(ast, "GeneratorExp", elt, generators)
+        }
         ExprKind::Await { value } => {
             let value = expr_to_py(value)?;
             py_value!(ast, "Await", value)
@@ -572,7 +621,15 @@ fn expr_kind_to_py<'a>(
             func,
             args,
             keywords,
-        } => todo!(),
+        } => {
+            let func = expr_to_py(func)?;
+            let args = expr_vec_to_py(args)?;
+            let keywords: Vec<_> = keywords
+                .into_iter()
+                .map(|k| keyword_data_to_py(k.node))
+                .try_collect()?;
+            py_value!(ast, "Call", func, args, keywords)
+        }
         ExprKind::FormattedValue {
             value,
             conversion,
@@ -678,8 +735,6 @@ fn match_pattern_to_py<'a>(
     py: Python<'a>,
     ast: &SymbolTable<'a>,
 ) -> PyResult<&'a PyAny> {
-    let none = py.None();
-
     let expr_to_py = |expr: Box<Expr>| expr_kind_to_py(expr.node, py, ast);
 
     match kind {
