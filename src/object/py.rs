@@ -11,7 +11,7 @@ use pyo3::{
     types::{PyComplex, PyList, PyString, PyTuple},
 };
 use rustpython_parser::ast::{
-    Alias, Boolop, Constant, Excepthandler, ExcepthandlerKind, Expr, ExprContext, ExprKind,
+    Alias, Boolop, Cmpop, Constant, Excepthandler, ExcepthandlerKind, Expr, ExprContext, ExprKind,
     MatchCase, Operator, PatternKind, Stmt, StmtKind, Unaryop, Withitem,
 };
 
@@ -377,6 +377,26 @@ fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
         "Await",
         "Yield",
         "YieldFrom",
+        "Eq",
+        "NotEq",
+        "Lt",
+        "LtE",
+        "Gt",
+        "GtE",
+        "Is",
+        "IsNot",
+        "In",
+        "NotIn",
+        "Compare",
+        "FormattedValue",
+        "JoinedStr",
+        "Constant",
+        "Attribute",
+        "Subscript",
+        "Starred",
+        "List",
+        "Tuple",
+        "Slice",
     ];
 
     let ast = PyModule::import(py, "ast")?;
@@ -440,6 +460,22 @@ fn unary_op_to_py<'a>(op: Unaryop, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny>
         Unaryop::Not => "Not",
         Unaryop::UAdd => "UAdd",
         Unaryop::USub => "USub",
+    };
+    py_value!(ast, class_name)
+}
+
+fn comp_op_to_py<'a>(op: Cmpop, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny> {
+    let class_name = match op {
+        Cmpop::Eq => "Eq",
+        Cmpop::NotEq => "NotEq",
+        Cmpop::Lt => "Lt",
+        Cmpop::LtE => "LtE",
+        Cmpop::Gt => "Gt",
+        Cmpop::GtE => "GtE",
+        Cmpop::Is => "Is",
+        Cmpop::IsNot => "IsNot",
+        Cmpop::In => "In",
+        Cmpop::NotIn => "NotIn",
     };
     py_value!(ast, class_name)
 }
@@ -523,7 +559,15 @@ fn expr_kind_to_py<'a>(
             left,
             ops,
             comparators,
-        } => todo!(),
+        } => {
+            let left = expr_to_py(left)?;
+            let ops: Vec<_> = ops
+                .into_iter()
+                .map(|op| comp_op_to_py(op, ast))
+                .try_collect()?;
+            let comparators = expr_vec_to_py(comparators)?;
+            py_value!(ast, "Compare", left, ops, comparators)
+        }
         ExprKind::Call {
             func,
             args,
@@ -533,20 +577,56 @@ fn expr_kind_to_py<'a>(
             value,
             conversion,
             format_spec,
-        } => todo!(),
-        ExprKind::JoinedStr { values } => todo!(),
-        ExprKind::Constant { value, kind } => todo!(),
-        ExprKind::Attribute { value, attr, ctx } => todo!(),
-        ExprKind::Subscript { value, slice, ctx } => todo!(),
-        ExprKind::Starred { value, ctx } => todo!(),
+        } => {
+            let value = expr_to_py(value)?;
+            let format_spec = opt_expr_to_py(format_spec)?;
+            py_value!(ast, "FormattedValue", value, conversion, format_spec)
+        }
+        ExprKind::JoinedStr { values } => {
+            let values = expr_vec_to_py(values)?;
+            py_value!(ast, "JoinedStr", values)
+        }
+        ExprKind::Constant { value, kind } => {
+            let value = constant_to_py(value, py, ast)?;
+            py_value!(ast, "Constant", value, kind)
+        }
+        ExprKind::Attribute { value, attr, ctx } => {
+            let value = expr_to_py(value)?;
+            let ctx = expr_ctx_to_py(ctx, ast)?;
+            py_value!(ast, "Attribute", value, attr, ctx)
+        }
+        ExprKind::Subscript { value, slice, ctx } => {
+            let value = expr_to_py(value)?;
+            let slice = expr_to_py(slice)?;
+            let ctx = expr_ctx_to_py(ctx, ast)?;
+            py_value!(ast, "Subscript", value, slice, ctx)
+        }
+        ExprKind::Starred { value, ctx } => {
+            let value = expr_to_py(value)?;
+            let ctx = expr_ctx_to_py(ctx, ast)?;
+            py_value!(ast, "Starred", value, ctx)
+        }
         ExprKind::Name { id, ctx } => {
             let id = str_to_py(&id);
             let ctx = expr_ctx_to_py(ctx, ast)?;
             py_value!(ast, "Name", id, ctx)
         }
-        ExprKind::List { elts, ctx } => todo!(),
-        ExprKind::Tuple { elts, ctx } => todo!(),
-        ExprKind::Slice { lower, upper, step } => todo!(),
+        ExprKind::List { elts, ctx } => {
+            let elts = expr_vec_to_py(elts)?;
+            let ctx = expr_ctx_to_py(ctx, ast)?;
+            py_value!(ast, "List", elts, ctx)
+        }
+        ExprKind::Tuple { elts, ctx } => {
+            let elts = expr_vec_to_py(elts)?;
+            let ctx = expr_ctx_to_py(ctx, ast)?;
+            py_value!(ast, "Tuple", elts, ctx)
+        }
+        ExprKind::Slice { lower, upper, step } => {
+            let lower = opt_expr_to_py(lower)?;
+            let upper = opt_expr_to_py(upper)?;
+            let step = opt_expr_to_py(step)?;
+            py_value!(ast, "Slice", lower, upper, step)
+        }
     }
 }
 
