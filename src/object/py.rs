@@ -8,12 +8,12 @@ use pyo3::{
     exceptions::PyValueError,
     prelude::*,
     pyclass::CompareOp,
-    types::{PyComplex, PyList, PyString, PyTuple},
+    types::{PyComplex, PyTuple},
 };
 use rustpython_parser::ast::{
-    Alias, Boolop, Cmpop, Comprehension, Constant, Excepthandler, ExcepthandlerKind, Expr,
-    ExprContext, ExprKind, KeywordData, MatchCase, Operator, PatternKind, Stmt, StmtKind, Unaryop,
-    Withitem,
+    Alias, Arg, Arguments, Boolop, Cmpop, Comprehension, Constant, Excepthandler,
+    ExcepthandlerKind, Expr, ExprContext, ExprKind, KeywordData, MatchCase, Operator, PatternKind,
+    Stmt, StmtKind, Unaryop, Withitem,
 };
 
 #[pyclass(get_all, set_all)]
@@ -405,6 +405,9 @@ fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
         "SetComp",
         "GeneratorExp",
         "DictComp",
+        "arg",
+        "arguments",
+        "Lambda",
     ];
 
     let ast = PyModule::import(py, "ast")?;
@@ -488,14 +491,61 @@ fn comp_op_to_py<'a>(op: Cmpop, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny> {
     py_value!(ast, class_name)
 }
 
+fn arg_to_py<'a>(arg: Arg, py: Python<'a>, ast: &SymbolTable<'a>) -> PyResult<&'a PyAny> {
+    let annotation = arg
+        .node
+        .annotation
+        .map(|e| expr_kind_to_py(e.node, py, ast))
+        .transpose()?;
+    py_value!(ast, "arg", arg.node.arg, annotation, arg.node.type_comment)
+}
+
+fn arguments_to_py<'a>(
+    args: Arguments,
+    py: Python<'a>,
+    ast: &SymbolTable<'a>,
+) -> PyResult<&'a PyAny> {
+    let args_to_py = |args: Vec<Arg>| -> PyResult<Vec<&PyAny>> {
+        args.into_iter()
+            .map(|a| arg_to_py(a, py, ast))
+            .try_collect()
+    };
+
+    let opt_arg_to_py = |arg: Option<Box<Arg>>| arg.map(|a| arg_to_py(*a, py, ast)).transpose();
+
+    let expr_vec_to_py = |exprs: Vec<Expr>| -> PyResult<Vec<_>> {
+        exprs
+            .into_iter()
+            .map(|e| expr_kind_to_py(e.node, py, ast))
+            .try_collect()
+    };
+
+    let posonlyargs = args_to_py(args.posonlyargs)?;
+    let args_ = args_to_py(args.args)?;
+    let kwonlyargs = args_to_py(args.kwonlyargs)?;
+    let vararg = opt_arg_to_py(args.vararg)?;
+    let kwarg = opt_arg_to_py(args.kwarg)?;
+    let kw_defaults = expr_vec_to_py(args.kw_defaults)?;
+    let defaults = expr_vec_to_py(args.defaults)?;
+
+    py_value!(
+        ast,
+        "arguments",
+        posonlyargs,
+        args_,
+        vararg,
+        kwonlyargs,
+        kw_defaults,
+        kwarg,
+        defaults
+    )
+}
+
 fn expr_kind_to_py<'a>(
     kind: ExprKind,
     py: Python<'a>,
     ast: &SymbolTable<'a>,
 ) -> PyResult<&'a PyAny> {
-    let none = py.None();
-
-    let str_to_py = |s: &str| PyString::new(py, s);
     let expr_to_py = |expr: Box<Expr>| expr_kind_to_py(expr.node, py, ast);
 
     let expr_vec_to_py = |exprs: Vec<Expr>| -> PyResult<Vec<_>> {
@@ -551,7 +601,11 @@ fn expr_kind_to_py<'a>(
             let operand = expr_to_py(operand)?;
             py_value!(ast, "UnaryOp", op, operand)
         }
-        ExprKind::Lambda { args, body } => todo!(),
+        ExprKind::Lambda { args, body } => {
+            let args = arguments_to_py(*args, py, ast)?;
+            let body = expr_to_py(body)?;
+            py_value!(ast, "Lambda", args, body)
+        }
         ExprKind::IfExp { test, body, orelse } => {
             let test = expr_to_py(test)?;
             let body = expr_to_py(body)?;
@@ -664,7 +718,6 @@ fn expr_kind_to_py<'a>(
             py_value!(ast, "Starred", value, ctx)
         }
         ExprKind::Name { id, ctx } => {
-            let id = str_to_py(&id);
             let ctx = expr_ctx_to_py(ctx, ast)?;
             py_value!(ast, "Name", id, ctx)
         }
@@ -714,7 +767,7 @@ fn constant_to_py<'a>(
         Constant::Str(s) => s.into_py(py),
         Constant::Bytes(b) => b.into_py(py),
         // FIXME: Handle BigInt properly
-        Constant::Int(i) => 1.into_py(py),
+        Constant::Int(_i) => 1.into_py(py),
         Constant::Tuple(t) => PyTuple::new(
             py,
             t.into_iter()
