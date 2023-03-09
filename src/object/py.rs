@@ -58,16 +58,6 @@ impl SourceSpan {
     }
 }
 
-impl From<super::SourceSpan> for SourceSpan {
-    fn from(value: super::SourceSpan) -> Self {
-        Self {
-            filename: value.path.to_str().unwrap().to_string(),
-            start_line: value.start as i32,
-            end_line: value.end as i32,
-        }
-    }
-}
-
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct ObjectPath {
@@ -79,21 +69,20 @@ pub struct ObjectPath {
 
 #[pymethods]
 impl ObjectPath {
+    #[new]
+    fn new(components: Vec<String>, formatted_path: String) -> Self {
+        Self {
+            components,
+            formatted_path,
+        }
+    }
+
     fn append_part(&mut self, part: String) {
         self.components.push(part);
     }
 
     fn __str__(&self) -> String {
         self.components.join(".")
-    }
-}
-
-impl From<super::ObjectPath> for ObjectPath {
-    fn from(value: super::ObjectPath) -> Self {
-        Self {
-            formatted_path: value.to_string(),
-            components: value.components,
-        }
     }
 }
 
@@ -109,12 +98,17 @@ pub struct Object {
 #[pymethods]
 impl Object {
     #[new]
-    fn new(source_span: SourceSpan, name: String, object_path: ObjectPath) -> Self {
+    fn new(
+        source_span: SourceSpan,
+        name: String,
+        object_path: ObjectPath,
+        children: HashMap<String, PyObject>,
+    ) -> Self {
         Self {
             source_span,
             object_path,
             name,
-            children: HashMap::new(),
+            children,
         }
     }
 
@@ -156,7 +150,7 @@ impl Hash for Object {
 #[derive(Debug, Clone)]
 pub struct AltObject {
     alt_name: String,
-    sub_ob: Object,
+    sub_ob: PyObject,
 }
 
 #[pymethods]
@@ -166,12 +160,14 @@ impl AltObject {
         source_span: SourceSpan,
         name: String,
         object_path: ObjectPath,
-        sub_ob: Object,
-        alt_cnt: i32,
+        sub_ob: PyObject,
+        children: HashMap<String, PyObject>,
     ) -> (Self, Object) {
-        let alt_name = format!("{}#{}", name, alt_cnt);
-        let ob = Object::new(source_span, alt_name.clone(), object_path);
-        let alt = AltObject { alt_name, sub_ob };
+        let ob = Object::new(source_span, name.clone(), object_path, children);
+        let alt = AltObject {
+            alt_name: name,
+            sub_ob,
+        };
         (alt, ob)
     }
 }
@@ -183,8 +179,16 @@ pub struct Module;
 #[pymethods]
 impl Module {
     #[new]
-    fn new(source_span: SourceSpan, name: String, object_path: ObjectPath) -> (Self, Object) {
-        (Self {}, Object::new(source_span, name, object_path))
+    fn new(
+        source_span: SourceSpan,
+        name: String,
+        object_path: ObjectPath,
+        children: HashMap<String, PyObject>,
+    ) -> (Self, Object) {
+        (
+            Self {},
+            Object::new(source_span, name, object_path, children),
+        )
     }
 
     fn __str__(&self) -> String {
@@ -203,8 +207,16 @@ pub struct Class;
 #[pymethods]
 impl Class {
     #[new]
-    fn new(source_span: SourceSpan, name: String, object_path: ObjectPath) -> (Self, Object) {
-        (Self {}, Object::new(source_span, name, object_path))
+    fn new(
+        source_span: SourceSpan,
+        name: String,
+        object_path: ObjectPath,
+        children: HashMap<String, PyObject>,
+    ) -> (Self, Object) {
+        (
+            Self {},
+            Object::new(source_span, name, object_path, children),
+        )
     }
 
     fn __str__(&self) -> String {
@@ -222,16 +234,6 @@ pub enum FormalParamKind {
     POSONLY = 0,
     NORMAL = 1,
     KWONLY = 2,
-}
-
-impl From<super::FormalParamKind> for FormalParamKind {
-    fn from(value: super::FormalParamKind) -> Self {
-        match value {
-            super::FormalParamKind::PosOnly => Self::POSONLY,
-            super::FormalParamKind::KwOnly => Self::KWONLY,
-            super::FormalParamKind::Normal => Self::NORMAL,
-        }
-    }
 }
 
 #[pyclass(get_all, set_all)]
@@ -254,16 +256,6 @@ impl FormalParam {
     }
 }
 
-impl From<super::FormalParam> for FormalParam {
-    fn from(value: super::FormalParam) -> Self {
-        Self {
-            name: value.name,
-            has_default: value.has_default,
-            kind: value.kind.into(),
-        }
-    }
-}
-
 #[pyclass(extends=Object)]
 #[derive(Clone, Debug)]
 pub struct Function {
@@ -277,15 +269,26 @@ pub struct Function {
 
 #[pymethods]
 impl Function {
+    #[allow(clippy::too_many_arguments)]
     #[new]
     fn new(
-        func: Function,
         source_span: SourceSpan,
         name: String,
         object_path: ObjectPath,
-    ) -> PyResult<(Self, Object)> {
-        let object = Object::new(source_span, name, object_path);
-        Ok((func, object))
+        children: HashMap<String, PyObject>,
+        formal_params: Vec<FormalParam>,
+        formatted_args: String,
+        stmts: HashMap<i32, PyObject>,
+        kwarg: Option<String>,
+    ) -> (Self, Object) {
+        let func = Function {
+            formal_params,
+            kwarg,
+            formatted_args,
+            stmts,
+        };
+        let object = Object::new(source_span, name, object_path, children);
+        (func, object)
     }
 
     fn has_kwargs_dict(&self) -> bool {
@@ -312,34 +315,6 @@ impl Function {
             "function {}({})",
             super_.object_path.formatted_path, self_.formatted_args
         )
-    }
-}
-
-impl Function {
-    pub fn from_rust(py: Python, func: super::Function) -> PyResult<Self> {
-        let formal_params = func
-            .formal_params()
-            .into_iter()
-            .map(FormalParam::from)
-            .collect();
-        let kwarg = if func.has_kwargs_dict() {
-            Some(func.kwargs_name())
-        } else {
-            None
-        };
-        let formatted_args = func.format_args();
-        let ast = get_ast_symbol_table(py)?;
-        let stmts: HashMap<_, _> = func
-            .stmts
-            .into_iter()
-            .map(|(k, v)| stmt_kind_to_py(v, py, &ast).map(|v| (k as i32, v.into_py(py))))
-            .try_collect()?;
-        Ok(Self {
-            formal_params,
-            kwarg,
-            formatted_args,
-            stmts,
-        })
     }
 }
 
@@ -1095,6 +1070,139 @@ fn stmt_kind_to_py<'a>(
         StmtKind::Pass => py_value!(ast, "Pass"),
         StmtKind::Break => py_value!(ast, "Break"),
         StmtKind::Continue => py_value!(ast, "Continue"),
+    }
+}
+
+fn source_span_to_py(py: Python, span: super::SourceSpan) -> PyResult<&PyAny> {
+    let span_type = py.get_type::<SourceSpan>();
+    let val = span_type
+        .call1((
+            span.path.to_str().unwrap().to_string(),
+            span.start,
+            span.end,
+        ))?
+        .downcast()?;
+    Ok(val)
+}
+
+fn object_path_to_py(py: Python, path: super::ObjectPath) -> PyResult<&PyAny> {
+    let path_type = py.get_type::<ObjectPath>();
+    let formatted_args = path.to_string();
+    let val = path_type
+        .call1((path.components, formatted_args))?
+        .downcast()?;
+    Ok(val)
+}
+
+pub fn module_to_py(py: Python, module: super::Module) -> PyResult<&PyAny> {
+    let mod_type = py.get_type::<Module>();
+    let name = module.name().to_string();
+    let ss = source_span_to_py(py, module.data.span)?;
+    let path = object_path_to_py(py, module.data.obj_path)?;
+    let children: HashMap<_, _> = module
+        .data
+        .children
+        .into_iter()
+        .map(|(k, v)| object_to_py(py, v).map(|v| (k, v.into_py(py))))
+        .try_collect()?;
+    let val = mod_type.call1((ss, name, path, children))?.downcast()?;
+    Ok(val)
+}
+
+fn class_to_py(py: Python, class: super::Class) -> PyResult<&PyAny> {
+    let class_type = py.get_type::<Class>();
+    let name = class.data.name().to_string();
+    let ss = source_span_to_py(py, class.data.span)?;
+    let path = object_path_to_py(py, class.data.obj_path)?;
+    let children: HashMap<_, _> = class
+        .data
+        .children
+        .into_iter()
+        .map(|(k, v)| object_to_py(py, v).map(|v| (k, v.into_py(py))))
+        .try_collect()?;
+    let val = class_type.call1((ss, name, path, children))?.downcast()?;
+    Ok(val)
+}
+
+fn formal_param_to_py(py: Python, fp: super::FormalParam) -> PyResult<&PyAny> {
+    let kind = match fp.kind {
+        super::FormalParamKind::PosOnly => FormalParamKind::POSONLY,
+        super::FormalParamKind::KwOnly => FormalParamKind::KWONLY,
+        super::FormalParamKind::Normal => FormalParamKind::NORMAL,
+    }
+    .into_py(py);
+    let fp_type = py.get_type::<FormalParam>();
+    let val = fp_type.call1((fp.name, fp.has_default, kind))?.downcast()?;
+    Ok(val)
+}
+
+fn function_to_py(py: Python, func: super::Function) -> PyResult<&PyAny> {
+    let func_type = py.get_type::<Function>();
+    let data = func.data.clone();
+    let name = data.name().to_string();
+    let ss = source_span_to_py(py, data.span)?;
+    let path = object_path_to_py(py, data.obj_path)?;
+    let children: HashMap<_, _> = data
+        .children
+        .into_iter()
+        .map(|(k, v)| object_to_py(py, v).map(|v| (k, v.into_py(py))))
+        .try_collect()?;
+    let formal_params: Vec<_> = func
+        .formal_params()
+        .into_iter()
+        .map(|fp| formal_param_to_py(py, fp))
+        .try_collect()?;
+    let kwarg = if func.has_kwargs_dict() {
+        Some(func.kwargs_name())
+    } else {
+        None
+    };
+    let formatted_args = func.format_args();
+    let ast = get_ast_symbol_table(py)?;
+    let stmts: HashMap<_, _> = func
+        .stmts
+        .into_iter()
+        .map(|(k, v)| stmt_kind_to_py(v, py, &ast).map(|v| (k as i32, v.into_py(py))))
+        .try_collect()?;
+    let val = func_type
+        .call1((
+            ss,
+            name,
+            path,
+            children,
+            formal_params,
+            formatted_args,
+            stmts,
+            kwarg,
+        ))?
+        .downcast()?;
+    Ok(val)
+}
+
+fn alt_object_to_py(py: Python, alt_ob: super::AltObject) -> PyResult<&PyAny> {
+    let alt_object_type = py.get_type::<AltObject>();
+    let name = alt_ob.data.name().to_string();
+    let ss = source_span_to_py(py, alt_ob.data.span)?;
+    let path = object_path_to_py(py, alt_ob.data.obj_path)?;
+    let sub_ob = object_to_py(py, *alt_ob.sub_ob)?;
+    let children: HashMap<_, _> = alt_ob
+        .data
+        .children
+        .into_iter()
+        .map(|(k, v)| object_to_py(py, v).map(|v| (k, v.into_py(py))))
+        .try_collect()?;
+    let val = alt_object_type
+        .call1((ss, name, path, sub_ob, children))?
+        .downcast()?;
+    Ok(val)
+}
+
+fn object_to_py(py: Python, ob: super::Object) -> PyResult<&PyAny> {
+    match ob {
+        super::Object::Module(module) => module_to_py(py, module),
+        super::Object::Class(class) => class_to_py(py, class),
+        super::Object::Function(func) => function_to_py(py, func),
+        super::Object::AltObject(alt_ob) => alt_object_to_py(py, alt_ob),
     }
 }
 
