@@ -12,6 +12,7 @@ fn parse_py(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<object::py::Module>()?;
     m.add_class::<object::py::Class>()?;
     m.add_class::<object::py::FormalParamKind>()?;
+    m.add_class::<object::py::FormalParam>()?;
     m.add_class::<object::py::Function>()?;
     Ok(())
 }

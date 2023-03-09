@@ -264,7 +264,6 @@ impl From<super::FormalParam> for FormalParam {
     }
 }
 
-// FIXME: Add stmts
 #[pyclass(extends=Object)]
 #[derive(Clone, Debug)]
 pub struct Function {
@@ -278,6 +277,17 @@ pub struct Function {
 
 #[pymethods]
 impl Function {
+    #[new]
+    fn new(
+        func: Function,
+        source_span: SourceSpan,
+        name: String,
+        object_path: ObjectPath,
+    ) -> PyResult<(Self, Object)> {
+        let object = Object::new(source_span, name, object_path);
+        Ok((func, object))
+    }
+
     fn has_kwargs_dict(&self) -> bool {
         self.kwarg.is_some()
     }
@@ -302,6 +312,34 @@ impl Function {
             "function {}({})",
             super_.object_path.formatted_path, self_.formatted_args
         )
+    }
+}
+
+impl Function {
+    pub fn from_rust(py: Python, func: super::Function) -> PyResult<Self> {
+        let formal_params = func
+            .formal_params()
+            .into_iter()
+            .map(FormalParam::from)
+            .collect();
+        let kwarg = if func.has_kwargs_dict() {
+            Some(func.kwargs_name())
+        } else {
+            None
+        };
+        let formatted_args = func.format_args();
+        let ast = get_ast_symbol_table(py)?;
+        let stmts: HashMap<_, _> = func
+            .stmts
+            .into_iter()
+            .map(|(k, v)| stmt_kind_to_py(v, py, &ast).map(|v| (k as i32, v.into_py(py))))
+            .try_collect()?;
+        Ok(Self {
+            formal_params,
+            kwarg,
+            formatted_args,
+            stmts,
+        })
     }
 }
 
