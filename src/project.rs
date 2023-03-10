@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use rayon::prelude::*;
+
 use crate::object::{Module, ModuleCreator, Object, ObjectPath};
 
 pub mod py;
@@ -44,14 +46,29 @@ fn module_from_dir(par_path: ObjectPath, dir: PathBuf) -> Result<Option<Module>>
     let mut new_path = par_path;
     new_path.append_part(main_mod.name().to_string());
 
-    for file in drc.files {
-        let child_mod = mod_from_file(file, new_path.clone())?;
-        main_mod.append_child(Object::Module(child_mod));
+    {
+        let mut child_mods = Vec::new();
+        drc.files
+            .into_par_iter()
+            .map(|f| mod_from_file(f, new_path.clone()))
+            .collect_into_vec(&mut child_mods);
+        for child in child_mods {
+            let child = child?;
+            main_mod.append_child(Object::Module(child));
+        }
     }
-    for dir in drc.dirs {
-        let child_ob = module_from_dir(new_path.clone(), dir)?;
-        if let Some(child_ob) = child_ob {
-            main_mod.append_child(Object::Module(child_ob));
+
+    {
+        let mut child_mods = Vec::new();
+        drc.dirs
+            .into_par_iter()
+            .map(|p| module_from_dir(new_path.clone(), p))
+            .collect_into_vec(&mut child_mods);
+        for child in child_mods {
+            let child = child?;
+            if let Some(child) = child {
+                main_mod.append_child(Object::Module(child));
+            }
         }
     }
 
