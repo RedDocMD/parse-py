@@ -435,7 +435,7 @@ fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
 #[rustfmt::skip]
 macro_rules! py_value {
     ($ast:ident, $name:expr) => {
-        Ok($ast[$name].call0()?.downcast()?)
+        $ast[$name].call0()
     };
     ($ast:ident, $name:expr, $($arg:expr),+) => {
         $ast[$name].call1(($($arg,)*))
@@ -1075,23 +1075,17 @@ fn stmt_kind_to_py<'a>(
 
 fn source_span_to_py(py: Python, span: super::SourceSpan) -> PyResult<&PyAny> {
     let span_type = py.get_type::<SourceSpan>();
-    let val = span_type
-        .call1((
-            span.path.to_str().unwrap().to_string(),
-            span.start,
-            span.end,
-        ))?
-        .downcast()?;
-    Ok(val)
+    span_type.call1((
+        span.path.to_str().unwrap().to_string(),
+        span.start,
+        span.end,
+    ))
 }
 
 fn object_path_to_py(py: Python, path: super::ObjectPath) -> PyResult<&PyAny> {
     let path_type = py.get_type::<ObjectPath>();
     let formatted_args = path.to_string();
-    let val = path_type
-        .call1((path.components, formatted_args))?
-        .downcast()?;
-    Ok(val)
+    path_type.call1((path.components, formatted_args))
 }
 
 pub fn module_to_py(py: Python, module: super::Module) -> PyResult<&PyAny> {
@@ -1105,8 +1099,7 @@ pub fn module_to_py(py: Python, module: super::Module) -> PyResult<&PyAny> {
         .into_iter()
         .map(|(k, v)| object_to_py(py, v).map(|v| (k, v.into_py(py))))
         .try_collect()?;
-    let val = mod_type.call1((ss, name, path, children))?.downcast()?;
-    Ok(val)
+    mod_type.call1((ss, name, path, children))
 }
 
 fn class_to_py(py: Python, class: super::Class) -> PyResult<&PyAny> {
@@ -1120,8 +1113,7 @@ fn class_to_py(py: Python, class: super::Class) -> PyResult<&PyAny> {
         .into_iter()
         .map(|(k, v)| object_to_py(py, v).map(|v| (k, v.into_py(py))))
         .try_collect()?;
-    let val = class_type.call1((ss, name, path, children))?.downcast()?;
-    Ok(val)
+    class_type.call1((ss, name, path, children))
 }
 
 fn formal_param_to_py(py: Python, fp: super::FormalParam) -> PyResult<&PyAny> {
@@ -1132,8 +1124,7 @@ fn formal_param_to_py(py: Python, fp: super::FormalParam) -> PyResult<&PyAny> {
     }
     .into_py(py);
     let fp_type = py.get_type::<FormalParam>();
-    let val = fp_type.call1((fp.name, fp.has_default, kind))?.downcast()?;
-    Ok(val)
+    fp_type.call1((fp.name, fp.has_default, kind))
 }
 
 fn function_to_py(py: Python, func: super::Function) -> PyResult<&PyAny> {
@@ -1164,19 +1155,16 @@ fn function_to_py(py: Python, func: super::Function) -> PyResult<&PyAny> {
         .into_iter()
         .map(|(k, v)| stmt_kind_to_py(v, py, &ast).map(|v| (k as i32, v.into_py(py))))
         .try_collect()?;
-    let val = func_type
-        .call1((
-            ss,
-            name,
-            path,
-            children,
-            formal_params,
-            formatted_args,
-            stmts,
-            kwarg,
-        ))?
-        .downcast()?;
-    Ok(val)
+    func_type.call1((
+        ss,
+        name,
+        path,
+        children,
+        formal_params,
+        formatted_args,
+        stmts,
+        kwarg,
+    ))
 }
 
 fn alt_object_to_py(py: Python, alt_ob: super::AltObject) -> PyResult<&PyAny> {
@@ -1191,10 +1179,7 @@ fn alt_object_to_py(py: Python, alt_ob: super::AltObject) -> PyResult<&PyAny> {
         .into_iter()
         .map(|(k, v)| object_to_py(py, v).map(|v| (k, v.into_py(py))))
         .try_collect()?;
-    let val = alt_object_type
-        .call1((ss, name, path, sub_ob, children))?
-        .downcast()?;
-    Ok(val)
+    alt_object_type.call1((ss, name, path, sub_ob, children))
 }
 
 fn object_to_py(py: Python, ob: super::Object) -> PyResult<&PyAny> {

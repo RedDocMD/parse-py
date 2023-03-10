@@ -16,13 +16,22 @@ fn main() {
 }
 
 fn do_parse(name: &str, path: &str) {
+    println!("{}", name);
+
     let path = PathBuf::from(path);
-    let start = Instant::now();
+
+    let parse_start = Instant::now();
     let project = Project::create(path).unwrap();
+    let parse_end = Instant::now();
+    println!("  Parse => {}ms", (parse_end - parse_start).as_millis());
+
     Python::with_gil(|py| {
+        let translate_start = Instant::now();
         let _mod_py = module_to_py(py, project.root_ob).unwrap();
+        let translate_end = Instant::now();
+        println!(
+            "  Translate => {}ms",
+            (translate_end - translate_start).as_millis()
+        );
     });
-    let end = Instant::now();
-    let duration = end - start;
-    println!("{} => {}ms", name, duration.as_millis());
 }
