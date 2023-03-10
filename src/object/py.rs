@@ -381,7 +381,7 @@ fn get_ast_symbol_table(py: Python) -> PyResult<SymbolTable> {
         "NamedExpr",
         "BinOp",
         "Invert",
-        "Add",
+        "Not",
         "UAdd",
         "USub",
         "UnaryOp",
@@ -438,7 +438,7 @@ macro_rules! py_value {
         Ok($ast[$name].call0()?.downcast()?)
     };
     ($ast:ident, $name:expr, $($arg:expr),+) => {
-        Ok($ast[$name].call1(($($arg,)*))?.downcast()?)
+        $ast[$name].call1(($($arg,)*))
     };
 }
 
@@ -890,14 +890,14 @@ fn stmt_kind_to_py<'a>(
     kind: StmtKind,
     py: Python<'a>,
     ast: &SymbolTable<'a>,
-) -> PyResult<&'a PyAny> {
+) -> PyResult<PyObject> {
     let expr_vec_to_list = |exprs: Vec<Expr>| -> PyResult<Vec<&PyAny>> {
         exprs
             .into_iter()
             .map(|val| expr_kind_to_py(val.node, py, ast))
             .try_collect()
     };
-    let stmt_vec_to_list = |stmts: Vec<Stmt>| -> PyResult<Vec<&PyAny>> {
+    let stmt_vec_to_list = |stmts: Vec<Stmt>| -> PyResult<Vec<PyObject>> {
         stmts
             .into_iter()
             .map(|val| stmt_kind_to_py(val.node, py, ast))
@@ -916,13 +916,12 @@ fn stmt_kind_to_py<'a>(
     };
     let alias_to_py =
         |a: Alias| -> PyResult<&PyAny> { py_value!(ast, "alias", a.node.name, a.node.asname) };
+    let none = py.None();
 
-    match kind {
-        StmtKind::FunctionDef { .. } => unreachable!("FunctionDef shouldn't exist in stmts"),
-        StmtKind::AsyncFunctionDef { .. } => {
-            unreachable!("AsyncFunctionDef shouldn't exist in stmts")
-        }
-        StmtKind::ClassDef { .. } => unreachable!("ClassDef shouldn't exist in stmts"),
+    let val = match kind {
+        StmtKind::FunctionDef { .. } => return Ok(none),
+        StmtKind::AsyncFunctionDef { .. } => return Ok(none),
+        StmtKind::ClassDef { .. } => return Ok(none),
         StmtKind::Return { value } => {
             let value = opt_expr_to_py(value)?;
             py_value!(ast, "Return", value)
@@ -1070,7 +1069,8 @@ fn stmt_kind_to_py<'a>(
         StmtKind::Pass => py_value!(ast, "Pass"),
         StmtKind::Break => py_value!(ast, "Break"),
         StmtKind::Continue => py_value!(ast, "Continue"),
-    }
+    };
+    val.map(|v| v.into())
 }
 
 fn source_span_to_py(py: Python, span: super::SourceSpan) -> PyResult<&PyAny> {

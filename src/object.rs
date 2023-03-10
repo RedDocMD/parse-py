@@ -502,9 +502,9 @@ fn extract_statement(stmt: Stmt) -> HashMap<usize, StmtKind> {
     let mut stmts = HashMap::from([(stmt.location.row(), node.clone())]);
     match node {
         // Don't recurse into function or class definitions, that is handled else-where
-        StmtKind::FunctionDef { .. } => return HashMap::new(),
-        StmtKind::AsyncFunctionDef { .. } => return HashMap::new(),
-        StmtKind::ClassDef { .. } => return HashMap::new(),
+        StmtKind::FunctionDef { .. } => stmts.clear(),
+        StmtKind::AsyncFunctionDef { .. } => stmts.clear(),
+        StmtKind::ClassDef { .. } => stmts.clear(),
         // For the rest, recurse
         StmtKind::For { body, .. } => stmts.extend(extract_statements_from_body(body)),
         StmtKind::AsyncFor { body, .. } => stmts.extend(extract_statements_from_body(body)),
