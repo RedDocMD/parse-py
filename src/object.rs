@@ -234,7 +234,7 @@ impl Function {
 
     pub fn formal_params(&self) -> Vec<FormalParam> {
         fn arg_names(args: &[Arg]) -> Vec<String> {
-            args.into_iter().map(|arg| arg.node.arg.clone()).collect()
+            args.iter().map(|arg| arg.node.arg.clone()).collect()
         }
 
         let posonly = arg_names(&self.args.posonlyargs);
@@ -293,7 +293,7 @@ impl Function {
         let kwonly = make_arg_list(&self.args.kwonlyargs);
 
         let mut out = String::new();
-        if posonly.len() > 0 {
+        if !posonly.is_empty() {
             out.push_str(&posonly);
             out.push('/');
         }

@@ -65,7 +65,7 @@ fn mod_from_file(path: PathBuf, par_path: ObjectPath) -> Result<Module> {
         &code,
         path.to_str().ok_or(ProjectError::OsStringNotUtf8)?,
     )?;
-    Ok(ModuleCreator::new(path.to_path_buf(), line_cnt, par_path).create(stmts))
+    Ok(ModuleCreator::new(path, line_cnt, par_path).create(stmts))
 }
 
 struct DirChildren {
