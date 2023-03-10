@@ -472,7 +472,7 @@ impl ModuleCreator {
     fn mod_name(&self) -> String {
         let mut parts = self.filename.components().rev();
         let last = parts.next().unwrap();
-        if let Component::Normal(last) = last {
+        let name = if let Component::Normal(last) = last {
             if last.as_bytes() == b"__init__.py" {
                 let par = parts.next().unwrap();
                 if let Component::Normal(par) = par {
@@ -485,6 +485,11 @@ impl ModuleCreator {
             }
         } else {
             unreachable!("mod path must have a filename");
+        };
+        if let Some(name) = name.strip_suffix(".py") {
+            name.to_string()
+        } else {
+            name
         }
     }
 }
