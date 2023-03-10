@@ -14,5 +14,6 @@ fn parse_py(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_class::<object::py::FormalParamKind>()?;
     m.add_class::<object::py::FormalParam>()?;
     m.add_class::<object::py::Function>()?;
+    m.add_function(wrap_pyfunction!(project::py::module_from_dir, m)?)?;
     Ok(())
 }

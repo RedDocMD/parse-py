@@ -4,9 +4,12 @@ use std::{
         HashMap,
     },
     hash::{Hash, Hasher},
+    path::PathBuf,
 };
 
-use pyo3::{prelude::*, pyclass::CompareOp};
+use pyo3::{exceptions::PyRuntimeError, prelude::*, pyclass::CompareOp};
+
+use crate::object::py::module_to_py;
 
 #[pyclass(get_all, set_all)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -90,4 +93,20 @@ impl DbIter {
     fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<(Position, PyObject)> {
         slf.inner.next()
     }
+}
+
+impl From<super::ProjectError> for PyErr {
+    fn from(value: super::ProjectError) -> Self {
+        let msg = value.to_string();
+        PyRuntimeError::new_err(msg)
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (path))]
+pub fn module_from_dir(py: Python, path: String) -> PyResult<&PyAny> {
+    let path = PathBuf::from(path);
+    let project = super::Project::create(path)?;
+    let module = module_to_py(py, project.root_ob)?;
+    Ok(module)
 }
