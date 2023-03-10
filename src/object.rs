@@ -584,6 +584,46 @@ fn objects_from_stmts(stmts: Vec<Stmt>, par_path: &ObjectPath, file_path: &Path)
                 objects.push(Object::Function(func));
             }
             // TODO: Handle async function
+            StmtKind::For { body, .. } => {
+                objects.extend(objects_from_stmts(body, par_path, file_path))
+            }
+            StmtKind::AsyncFor { body, .. } => {
+                objects.extend(objects_from_stmts(body, par_path, file_path))
+            }
+            StmtKind::While { body, .. } => {
+                objects.extend(objects_from_stmts(body, par_path, file_path))
+            }
+            StmtKind::If { body, .. } => {
+                objects.extend(objects_from_stmts(body, par_path, file_path))
+            }
+            StmtKind::With { body, .. } => {
+                objects.extend(objects_from_stmts(body, par_path, file_path))
+            }
+            StmtKind::AsyncWith { body, .. } => {
+                objects.extend(objects_from_stmts(body, par_path, file_path))
+            }
+            StmtKind::Match { cases, .. } => {
+                for cs in cases {
+                    objects.extend(objects_from_stmts(cs.body, par_path, file_path));
+                }
+            }
+            StmtKind::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                for b in [body, orelse, finalbody] {
+                    objects.extend(objects_from_stmts(b, par_path, file_path));
+                }
+                for h in handlers {
+                    match h.node {
+                        ExcepthandlerKind::ExceptHandler { body, .. } => {
+                            objects.extend(objects_from_stmts(body, par_path, file_path))
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
