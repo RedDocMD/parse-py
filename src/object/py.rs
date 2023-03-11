@@ -15,6 +15,7 @@ use rustpython_parser::ast::{
     ExcepthandlerKind, Expr, ExprContext, ExprKind, KeywordData, MatchCase, Operator, PatternKind,
     Stmt, StmtKind, Unaryop, Withitem,
 };
+use yansi::Paint;
 
 #[pyclass(get_all, set_all)]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -128,6 +129,10 @@ impl Object {
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
         hasher.finish()
+    }
+
+    fn full_path(&self) -> String {
+        self.object_path.formatted_path.clone()
     }
 }
 
@@ -313,8 +318,13 @@ impl Function {
         let super_ = self_.as_ref();
         format!(
             "function {}({})",
-            super_.object_path.formatted_path, self_.formatted_args
+            Paint::yellow(&super_.object_path.formatted_path).bold(),
+            self_.formatted_args
         )
+    }
+
+    fn _format_args(&self) -> String {
+        self.formatted_args.clone()
     }
 }
 

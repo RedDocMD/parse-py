@@ -13,6 +13,7 @@ pyo3 = { version = "0.18.1"}
 rayon = "1.6.1"
 rustpython-parser = "0.2.0"
 thiserror = "1"
+yansi = "0.5.1"
 
 [features]
 extension-module = ["pyo3/extension-module"]
