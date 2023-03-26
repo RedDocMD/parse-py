@@ -6,6 +6,15 @@ use pyo3::Python;
 fn main() {
     let projects = vec![
         ("requests", "projects/requests/requests"),
+        (
+            "pygments",
+            "/home/dknite/work/stuff/pygments-master/pygments",
+        ),
+        ("numpy", "/home/dknite/work/stuff/numpy-main/numpy"),
+        (
+            "scikit learn",
+            "/home/dknite/work/stuff/scikit-learn-main/sklearn",
+        ),
         ("sympy", "projects/sympy/sympy"),
         ("pandas", "projects/pandas/pandas"),
     ];
