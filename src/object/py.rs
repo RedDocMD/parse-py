@@ -131,8 +131,8 @@ impl Object {
         hasher.finish()
     }
 
-    fn full_path(&self) -> String {
-        self.object_path.formatted_path.clone()
+    fn full_path(&self) -> ObjectPath {
+        self.object_path.clone()
     }
 }
 
